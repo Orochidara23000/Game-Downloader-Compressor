@@ -1,0 +1,28 @@
+# Use a lightweight Python image
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    lib32stdc++6 \
+    wget \
+    unzip \
+    tar \
+ && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the project files into the container
+COPY . /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Run setup.py during build to download and extract binaries
+RUN python setup.py
+
+# Expose the port your app will run on
+EXPOSE 7860
+
+# Define the command to run your app
+CMD ["python", "main.py"]
