@@ -12,9 +12,14 @@ fi
 mkdir -p logs output game
 chmod 755 logs output game
 
-# Run installation script to ensure dependencies are set up
-echo "Running install_dependencies.sh..."
-bash install_dependencies.sh
+# Skip dependency installation when running in a Docker container
+if [ -f "/.dockerenv" ]; then
+    echo "Running in Docker container - dependencies already installed"
+else
+    # Only run installation script in non-Docker environments
+    echo "Running install_dependencies.sh..."
+    bash install_dependencies.sh
+fi
 
 # Run the setup script
 echo "Running setup.py..."
