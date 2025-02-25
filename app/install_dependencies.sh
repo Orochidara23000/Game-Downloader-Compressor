@@ -4,10 +4,9 @@ set -e
 echo "Installing dependencies..."
 
 # Install 7z if not available
-if ! command -v 7z &> /dev/null
-then
+if ! command -v 7z &> /dev/null; then
     echo "7z not found. Installing p7zip-full..."
-    sudo apt-get update && sudo apt-get install -y p7zip-full
+    apt-get update && apt-get install -y p7zip-full
 else
     echo "7z is already installed."
 fi
@@ -28,7 +27,6 @@ fi
 if [ ! -d "./localxpose" ]; then
     echo "Downloading LocalXpose..."
     mkdir -p localxpose
-    # Replace the URL below with the appropriate download link if needed
     wget -O localxpose/localxpose.zip https://github.com/localxpose/localxpose/releases/latest/download/localxpose-linux-amd64.zip
     echo "Extracting LocalXpose..."
     unzip localxpose/localxpose.zip -d localxpose
