@@ -17,7 +17,7 @@ import dotenv
 # Load environment variables from .env file if it exists
 dotenv.load_dotenv()
 
-# === Logging Setup with Rotation ===
+# === Logging Setup with Rotation and Stream Handler ===
 log_dir = os.path.join(os.getcwd(), "logs")
 try:
     os.makedirs(log_dir, exist_ok=True)
@@ -31,11 +31,17 @@ logger = logging.getLogger("SteamCMDLogger")
 logger.setLevel(logging.INFO)
 if logger.hasHandlers():
     logger.handlers.clear()
-# Use rotating file handler with 10MB max size and keep 5 backup files
-handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5, delay=False)
+
+# Rotating file handler (writes logs to file)
+file_handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5, delay=False)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# Stream handler (writes logs to stdout)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 
 def log_flush():
     """Flush all log handlers."""
@@ -805,7 +811,6 @@ try:
 except Exception as e:
     logger.error(f"Failed to load queue tasks at startup: {str(e)}")
 
-# === get_downloaded_files Function ===
 def get_downloaded_files(output_path=None):
     """
     Return a list of downloaded file parts or the main file if parts are not found.
@@ -826,15 +831,3 @@ def get_downloaded_files(output_path=None):
     if not files and os.path.exists(output_path):
         files.append(output_path)
     return "\n".join(files) if files else "No downloaded files found."
-
-# Existing rotating file handler
-handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5, delay=False)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-
-# Add a stream handler to output logs to stdout
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
-
