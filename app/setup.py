@@ -16,22 +16,47 @@ def install_dependencies():
         # Make script executable if it isn't already
         os.chmod("./install_dependencies.sh", 0o755)
         
-        # Run the script and capture output
-        process = subprocess.run(
-            ["bash", "./install_dependencies.sh"], 
-            capture_output=True, 
-            text=True
-        )
-        status = process.stdout
+        print("Starting dependency installation process...")
         
-        if process.returncode != 0:
-            status += f"\nError (code {process.returncode}): {process.stderr}"
+        # Run the script and capture output in real-time
+        process = subprocess.Popen(
+            ["bash", "./install_dependencies.sh"], 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Capture and display output in real-time
+        status_lines = []
+        for stdout_line in iter(process.stdout.readline, ""):
+            line = stdout_line.strip()
+            status_lines.append(line)
+            print(f"INSTALL: {line}")
+            
+        # Get the return code
+        process.stdout.close()
+        return_code = process.wait()
+        
+        # Capture any stderr output
+        stderr_output = process.stderr.read()
+        if stderr_output:
+            status_lines.append(f"STDERR: {stderr_output}")
+            print(f"INSTALL ERROR: {stderr_output}")
+        
+        status = "\n".join(status_lines)
+        
+        if return_code != 0:
+            status += f"\nError (code {return_code}): Installation failed. Please check logs."
         else:
             status += "\nDependencies installed successfully!"
         
         return status
     except Exception as e:
-        return f"Exception during installation: {str(e)}"
+        error_msg = f"Exception during installation: {str(e)}"
+        print(f"INSTALL EXCEPTION: {error_msg}")
+        return f"{status}\n{error_msg}" if status else error_msg
 
 with gr.Blocks() as demo:
     gr.Markdown("# Game Downloader and Compressor - Setup Demo")
