@@ -182,7 +182,7 @@ def verify_steam_login(username, password, steam_guard_code, anonymous=False):
                 stderr=subprocess.PIPE,
                 text=True
             )
-            process_id = register_process(login_process, "steam_login_verification")
+            register_process(login_process, "steam_login_verification")
             
             try:
                 output, error = login_process.communicate(timeout=60)
@@ -294,7 +294,7 @@ def estimate_game_size(app_id, steamcmd_path):
             stderr=subprocess.PIPE,
             text=True
         )
-        process_id = register_process(process, f"estimate_size_{app_id}")
+        register_process(process, f"estimate_size_{app_id}")
         
         try:
             output, error = process.communicate(timeout=120)
