@@ -380,15 +380,28 @@ def get_downloaded_files(output_path=None):
 
 localxpose_authtoken = os.getenv("LOCALXPOSE_AUTHTOKEN", "your_default_token")
 
+def get_loclx_path():
+    """Attempt to locate the 'loclx' binary."""
+    loclx_path = shutil.which("loclx")
+    if not loclx_path:
+        # Try to get the global npm binary directory
+        npm_bin = subprocess.run(["npm", "bin", "-g"], capture_output=True, text=True).stdout.strip()
+        loclx_path = os.path.join(npm_bin, "loclx")
+        if not os.path.exists(loclx_path):
+            raise FileNotFoundError("loclx not found. Ensure 'npm install -g loclx' has been executed and the global npm bin directory is in PATH.")
+    return loclx_path
+
 def start_localxpose_http():
     # Use the globally installed "loclx" from npm
-    cmd = ["loclx", "tunnel", "http", "--to", "http://localhost:7860", "--authtoken", localxpose_authtoken]
+    loclx_path = get_loclx_path()
+    cmd = [loclx_path, "tunnel", "http", "--to", "http://localhost:7860", "--authtoken", localxpose_authtoken]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for line in process.stdout:
         print(line, end="")
 
 def start_localxpose_udp(tunnel_type="basic", port=None, to_addr=None, reserved_endpoint=None):
-    cmd = ["loclx", "tunnel", "udp"]
+    loclx_path = get_loclx_path()
+    cmd = [loclx_path, "tunnel", "udp"]
     if tunnel_type == "custom_port":
         if port:
             cmd += ['--port', str(port)]
