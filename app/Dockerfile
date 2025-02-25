@@ -31,6 +31,5 @@ RUN mkdir -p /app/logs /app/output /app/game && chmod 755 /app/logs /app/output 
 EXPOSE 7860
 
 # Use a proper entrypoint script for startup
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+COPY --chmod=+x start.sh /app/start.sh
 CMD ["/app/start.sh"]
