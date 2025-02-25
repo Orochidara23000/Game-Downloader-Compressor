@@ -3,17 +3,13 @@ import gradio as gr
 import threading
 from common import (
     system_check, verify_disk_space, verify_steam_login,
-    download_and_compress_from_url, add_to_queue, get_queue_status, get_downloaded_files,
-    start_udp_tunnel, start_localxpose_http
+    download_and_compress_from_url, add_to_queue, get_queue_status, get_downloaded_files
 )
 
 # Ensure the default output directory exists
 default_output_dir = os.path.join(os.getcwd(), "output")
 os.makedirs(default_output_dir, exist_ok=True)
 default_output_path = os.path.join(default_output_dir, "game.7z")
-
-# Start the LocalXpose HTTP tunnel in a background thread
-threading.Thread(target=start_localxpose_http, daemon=True).start()
 
 with gr.Blocks() as demo:
     gr.Markdown("# Game Downloader and Compressor")
@@ -50,7 +46,6 @@ with gr.Blocks() as demo:
         download_error = gr.Textbox(label="Error Messages", lines=5)
         direct_download_btn = gr.Button("Direct Download and Compress")
         queue_download_btn = gr.Button("Add to Queue")
-        # Use default_output_path in function calls
         direct_download_btn.click(
             fn=lambda u, p, s, a, url, r: download_and_compress_from_url(u, p, s, a, url, default_output_path, r),
             inputs=[username_input, password_input, steam_guard_input, anonymous_checkbox_dl, steam_url_input, resume_checkbox],
@@ -72,17 +67,7 @@ with gr.Blocks() as demo:
         refresh_files_btn = gr.Button("Get Downloaded Files")
         refresh_files_btn.click(fn=get_downloaded_files, inputs=[], outputs=downloaded_files_box)
 
-    with gr.Accordion("UDP Tunnel Options", open=False):
-        gr.Markdown("Select the UDP tunnel type and parameters (as per your LocalXpose dashboard):")
-        udp_tunnel_type = gr.Dropdown(label="Tunnel Type", choices=["basic", "custom_port", "custom_to", "reserved"], value="basic")
-        udp_port = gr.Textbox(label="Port (e.g., 4545)", placeholder="Enter port if needed", value="")
-        udp_to = gr.Textbox(label="Local Address (e.g., 192.168.10.3:6655)", placeholder="Enter destination address if needed", value="")
-        udp_reserved = gr.Textbox(label="Reserved Endpoint (e.g., us.loclx.io:4455)", placeholder="Enter reserved endpoint if needed", value="")
-        udp_tunnel_status = gr.Textbox(label="UDP Tunnel Status", lines=2)
-        start_udp_btn = gr.Button("Start UDP Tunnel")
-        start_udp_btn.click(fn=start_udp_tunnel,
-                            inputs=[udp_tunnel_type, udp_port, udp_to, udp_reserved],
-                            outputs=udp_tunnel_status)
+    # Removed UDP Tunnel Options section since it's related to LocalXpose
 
 # Launch Gradio interface on port 7860
 if __name__ == "__main__":
