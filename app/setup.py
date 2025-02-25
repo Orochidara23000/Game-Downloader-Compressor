@@ -11,4 +11,11 @@ with gr.Blocks() as demo:
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, share=True, debug=True)
+    # Only use share=True in development, not in Railway
+    is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None
+    demo.launch(
+        server_name="0.0.0.0", 
+        server_port=port, 
+        share=not is_railway,  # Don't use Gradio sharing on Railway
+        debug=os.getenv("DEBUG", "false").lower() == "true"
+    )

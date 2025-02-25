@@ -3,34 +3,52 @@ set -euo pipefail
 
 echo "Starting install_dependencies.sh script."
 
-# Check if 7z is installed (should be provided by p7zip-full)
-if ! command -v 7z >/dev/null 2>&1; then
-  echo "Error: 7z not found. It should have been installed via the Dockerfile."
-  exit 1
+# Check if running in Railway environment
+if [ -n "${RAILWAY_ENVIRONMENT:-}" ]; then
+    echo "Running in Railway environment"
+    # Railway specific setup if needed
+    APP_DIR="${APP_DIR:-/app}"
 else
-  echo "7z is installed."
+    echo "Running in development environment"
+    APP_DIR="${APP_DIR:-.}"
 fi
 
-# Install SteamCMD if not found
-if [ ! -d "./steamcmd" ]; then
-  echo "Downloading SteamCMD..."
-  mkdir -p steamcmd
-  wget -O steamcmd/steamcmd_linux.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz || { echo "Failed to download SteamCMD"; exit 2; }
-  echo "Extracting SteamCMD..."
-  tar -xvzf steamcmd/steamcmd_linux.tar.gz -C steamcmd || { echo "Failed to extract SteamCMD"; exit 2; }
-  rm steamcmd/steamcmd_linux.tar.gz
-  
-  # Ensure steamcmd.sh is executable
-  chmod +x steamcmd/steamcmd.sh
-  
-  # Initial SteamCMD update to ensure it's working
-  ./steamcmd/steamcmd.sh +quit || { echo "Failed to run initial SteamCMD update"; exit 3; }
+# Create required directories with proper permissions
+mkdir -p "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game" 
+chmod 755 "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"
+echo "Created required directories with proper permissions."
+
+# Check if 7z is installed
+if command -v 7z &> /dev/null; then
+    echo "7zip is already installed."
 else
-  echo "SteamCMD already exists."
+    echo "Installing 7zip..."
+    apt-get update && apt-get install -y p7zip-full
+    echo "7zip installed successfully."
 fi
 
-# Create required directories
-mkdir -p logs output
-echo "Created required directories."
+# Check for steamcmd directory
+STEAMCMD_DIR="${APP_DIR}/steamcmd"
+if [ -d "$STEAMCMD_DIR" ] && [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
+    echo "SteamCMD is already installed."
+else
+    echo "Installing SteamCMD..."
+    mkdir -p "$STEAMCMD_DIR"
+    cd "$STEAMCMD_DIR"
+    
+    # Download and extract SteamCMD
+    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+    tar -xzf steamcmd_linux.tar.gz
+    rm steamcmd_linux.tar.gz
+    
+    # Make executable
+    chmod +x steamcmd.sh
+    
+    # Run SteamCMD to update itself
+    ./steamcmd.sh +quit || true
+    
+    echo "SteamCMD installed successfully."
+    cd "$APP_DIR"
+fi
 
 echo "All dependencies installed successfully."

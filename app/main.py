@@ -72,8 +72,14 @@ with gr.Blocks() as demo:
 # Launch Gradio interface on port 7860
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 7860))
-    urls = demo.launch(server_name="0.0.0.0", server_port=port, share=True, debug=True)
-    share_url = urls.get("share_url")
-    if share_url:
-        # Log the share URL using your logger
-        logger.info(f"Gradio share URL: {share_url}")
+    # Only use share=True in development, not in Railway
+    is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None
+    urls = demo.launch(
+        server_name="0.0.0.0", 
+        server_port=port, 
+        share=not is_railway,  # Don't use Gradio sharing on Railway
+        debug=os.getenv("DEBUG", "false").lower() == "true"
+    )
+    # Only log share URL if not on Railway
+    if not is_railway and urls.get("share_url"):
+        print(f"Gradio share URL: {urls.get('share_url')}")

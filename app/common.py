@@ -90,6 +90,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def get_available_space(path):
     """Get available disk space in bytes for the given path."""
+    path = os.path.abspath(path)  # Ensure absolute path
     try:
         result = subprocess.run(['df', '-k', path], capture_output=True, text=True)
         lines = result.stdout.splitlines()
@@ -102,6 +103,7 @@ def get_available_space(path):
 
 def verify_output_path(output_path):
     """Verify that the output path is valid and writable."""
+    output_path = os.path.abspath(output_path)  # Ensure absolute path
     logger.info(f"Verifying output path: {output_path}")
     if not os.path.isabs(output_path):
         msg = "Error: Output path must be absolute."
