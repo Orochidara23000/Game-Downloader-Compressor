@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY . /app
 
-RUN chmod +x install_dependencies.lf && bash install_dependencies.lf
+RUN chmod +x install_dependencies.sh && bash install_dependencies.sh
 
 RUN pip install --no-cache-dir -r requirements.txt
 
