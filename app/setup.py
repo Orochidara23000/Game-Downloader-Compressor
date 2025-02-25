@@ -16,6 +16,6 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0", 
         server_port=port, 
-        share=not is_railway,  # Don't use Gradio sharing on Railway
+        share=True,  # Always share the Gradio interface
         debug=os.getenv("DEBUG", "false").lower() == "true"
     )
