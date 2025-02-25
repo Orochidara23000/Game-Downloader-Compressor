@@ -62,10 +62,9 @@ def cleanup_processes():
             if process.poll() is None:  # Process is still running
                 logger.info(f"Terminating process: {process_info['name']} (PID: {process_id})")
                 process.terminate()
-                # Give it some time to terminate gracefully
                 time.sleep(2)
                 if process.poll() is None:  # Still running
-                    process.kill()  # Force kill
+                    process.kill()
                     logger.info(f"Force killed process: {process_info['name']}")
         except Exception as e:
             logger.error(f"Error cleaning up process {process_id}: {str(e)}")
@@ -185,7 +184,6 @@ def verify_steam_login(username, password, steam_guard_code, anonymous=False):
             )
             process_id = register_process(login_process, "steam_login_verification")
             
-            # Capture output with timeout
             try:
                 output, error = login_process.communicate(timeout=60)
             except subprocess.TimeoutExpired:
@@ -196,7 +194,7 @@ def verify_steam_login(username, password, steam_guard_code, anonymous=False):
                 continue
                 
             if "Waiting for user info...OK" in output:
-                time.sleep(5)  # Reduced from 20 seconds to 5
+                time.sleep(5)
                 msg = "Steam login verified successfully."
                 logger.info(msg)
                 log_flush()
@@ -243,7 +241,6 @@ def system_check():
     steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
     if os.path.exists(steamcmd_path):
         messages.append("steamcmd found.")
-        # Test if executable
         if os.access(steamcmd_path, os.X_OK):
             messages.append("steamcmd is executable.")
         else:
@@ -251,23 +248,9 @@ def system_check():
     else:
         messages.append("ERROR: steamcmd not found in ./steamcmd")
     
-    # Check LocalXpose
-    loclx_path = get_loclx_path(check_only=True)
-    if loclx_path:
-        messages.append(f"LocalXpose (loclx) found at: {loclx_path}")
-        # Check if token is set
-        authtoken = os.getenv("LOCALXPOSE_AUTHTOKEN")
-        if authtoken and authtoken != "your_default_token":
-            messages.append("LocalXpose authentication token found.")
-        else:
-            messages.append("WARNING: LocalXpose authentication token not set in environment variables!")
-    else:
-        messages.append("ERROR: LocalXpose (loclx) not found.")
-    
     # Check 7z
     if shutil.which("7z"):
         messages.append("7z found.")
-        # Test 7z functionality
         try:
             result = subprocess.run(['7z', '--help'], capture_output=True, text=True)
             if result.returncode == 0:
@@ -332,9 +315,8 @@ def estimate_game_size(app_id, steamcmd_path):
             msg = f"Estimated game size: {estimated_gb:.2f} GB"
             logger.info(msg)
             
-            # Check if we have enough space
             available_space = get_available_space(os.getcwd())
-            if available_space < size_bytes * 1.5:  # 50% buffer for installation and compression
+            if available_space < size_bytes * 1.5:
                 warning = f"WARNING: Available space ({available_space/1024**3:.2f} GB) may not be sufficient for this game ({estimated_gb:.2f} GB) plus overhead."
                 logger.warning(warning)
                 msg += f"\n{warning}"
@@ -439,7 +421,7 @@ def download_and_compress(username, password, steam_guard_code, app_id, output_p
             log_flush()
             return "", error_msg
             
-        time.sleep(5)  # Reduced from 20 seconds to 5
+        time.sleep(5)
         status_messages = ["Login successful."]
         logger.info("Login successful.")
         log_flush()
@@ -489,8 +471,7 @@ def download_and_compress(username, password, steam_guard_code, app_id, output_p
             logger.warning("Could not update AppInfo after multiple attempts, proceeding anyway.")
     except Exception as e:
         logger.error(f"Exception during AppInfo update: {str(e)}")
-        # Continue anyway as this is not critical
-
+    
     # Download game
     cmd_download = [
         steamcmd_path,
@@ -550,7 +531,6 @@ def download_and_compress(username, password, steam_guard_code, app_id, output_p
                 logger.info(f"Download output: {line.strip()}")
                 log_flush()
                 
-        # Wait for process to complete
         process_download.wait()
         
         if process_download.returncode != 0:
@@ -622,7 +602,6 @@ def download_and_compress(username, password, steam_guard_code, app_id, output_p
                 logger.info(f"Compression output: {line.strip()}")
                 log_flush()
                 
-        # Wait for process to complete
         process_compress.wait()
         
         if process_compress.returncode != 0:
@@ -725,8 +704,6 @@ def process_queue():
             result = "Completed" if not error else f"Failed: {error}"
             with queue_lock:
                 queue_status.append(f"Task {task_id} {result}")
-                
-                # Keep only last 100 status messages
                 if len(queue_status) > 100:
                     queue_status.pop(0)
                     
@@ -734,11 +711,8 @@ def process_queue():
         except Exception as e:
             with queue_lock:
                 queue_status.append(f"Task {task_id} failed with exception: {str(e)}")
-                
-                # Keep only last 100 status messages
                 if len(queue_status) > 100:
                     queue_status.pop(0)
-                    
             logger.error(f"Exception in download task {task_id}: {str(e)}")
         finally:
             download_queue.task_done()
@@ -763,11 +737,11 @@ def add_to_queue(username, password, steam_guard_code, anonymous, steam_url, out
     }
     download_queue.put(task)
     
-    # Save credentials securely (could be encrypted in a production environment)
-        with open(os.path.join(queue_dir, f"{task_id}.credentials.json"), 'w') as f:
-            json.dump(credentials, f)
-        
-        # Public task info (no credentials)
+    # Save task metadata to .queue directory (if needed)
+    try:
+        queue_dir = os.path.join(os.getcwd(), ".queue")
+        os.makedirs(queue_dir, exist_ok=True)
+        # Save public task info (no credentials)
         public_task = {
             'id': task_id,
             'anonymous': anonymous,
@@ -777,22 +751,16 @@ def add_to_queue(username, password, steam_guard_code, anonymous, steam_url, out
             'timestamp': task['timestamp'],
             'status': 'queued'
         }
-        
         with open(os.path.join(queue_dir, f"{task_id}.json"), 'w') as f:
             json.dump(public_task, f)
-            
         logger.info(f"Added task {task_id} to download queue")
         with queue_lock:
             queue_status.append(f"Task {task_id} for {steam_url} added to queue")
-            
-            # Keep only last 100 status messages
             if len(queue_status) > 100:
                 queue_status.pop(0)
-                
-        return task_id
     except Exception as e:
         logger.error(f"Failed to save queue task: {str(e)}")
-        return task_id  # Still return ID even if persistence fails
+    return task_id
 
 def get_queue_status():
     """Get current queue status."""
@@ -810,215 +778,28 @@ def load_queue_tasks():
         if not os.path.exists(queue_dir):
             logger.info("No saved queue found")
             return
-            
-        # Find all task files but not credential files
-        task_files = [f for f in os.listdir(queue_dir) if f.endswith('.json') and not 'credentials' in f]
-        
+        task_files = [f for f in os.listdir(queue_dir) if f.endswith('.json')]
         tasks_loaded = 0
         for task_file in task_files:
             try:
                 task_id = task_file.split('.')[0]
-                
-                # Load public task info
                 with open(os.path.join(queue_dir, task_file), 'r') as f:
                     task = json.load(f)
-                    
-                # Skip completed tasks
                 if task.get('status') in ['completed', 'failed']:
                     continue
-                    
-                # Load credentials if not anonymous
-                if not task['anonymous']:
-                    try:
-                        with open(os.path.join(queue_dir, f"{task_id}.credentials.json"), 'r') as f:
-                            credentials = json.load(f)
-                            username = credentials.get('username', '')
-                            password = credentials.get('password', '')
-                            steam_guard_code = credentials.get('steam_guard_code', '')
-                    except FileNotFoundError:
-                        logger.error(f"Credentials file for task {task_id} not found, skipping")
-                        continue
-                else:
-                    username = ''
-                    password = ''
-                    steam_guard_code = ''
-                
-                # Add to queue
+                # For non-anonymous tasks, credentials loading would be added here if needed
                 add_to_queue(
-                    username, password, steam_guard_code,
-                    task['anonymous'], task['steam_url'], 
-                    task['output_path'], task.get('resume', False)
+                    "", "", "",  # Credentials placeholders for anonymous tasks
+                    task['anonymous'], task['steam_url'], task['output_path'], task.get('resume', False)
                 )
                 tasks_loaded += 1
-                
             except Exception as e:
                 logger.error(f"Failed to load queue task {task_file}: {str(e)}")
-                
         logger.info(f"Loaded {tasks_loaded} tasks from queue")
     except Exception as e:
         logger.error(f"Failed to load queue: {str(e)}")
 
-def get_loclx_path(check_only=False):
-    """Get the path to the LocalXpose executable or check if it exists."""
-    # Try standard locations
-    loclx_paths = [
-        os.path.join(os.getcwd(), "loclx"),  # Current directory
-        os.path.join(os.getcwd(), "bin", "loclx"),  # bin subdirectory
-        shutil.which("loclx")  # System PATH
-    ]
-    
-    for path in loclx_paths:
-        if path and os.path.exists(path) and os.access(path, os.X_OK):
-            return path
-            
-    if not check_only:
-        # Try to download loclx
-        try:
-            logger.info("LocalXpose not found, attempting to download...")
-            # Determine platform
-            import platform
-            system = platform.system().lower()
-            machine = platform.machine().lower()
-            
-            # Map to loclx architecture
-            arch = None
-            if system == "linux":
-                if "arm" in machine or "aarch" in machine:
-                    if "64" in machine:
-                        arch = "arm64"
-                    else:
-                        arch = "arm"
-                elif "x86_64" in machine or "amd64" in machine:
-                    arch = "amd64"
-                else:
-                    arch = "386"
-            elif system == "darwin":  # macOS
-                if "arm" in machine or "aarch" in machine:
-                    arch = "arm64"
-                else:
-                    arch = "amd64"
-            elif system == "windows":
-                if "64" in machine:
-                    arch = "amd64"
-                else:
-                    arch = "386"
-                    
-            if not arch:
-                logger.error(f"Unsupported platform: {system} {machine}")
-                return None
-                
-            # Download URL
-            url = f"https://api.localxpose.io/api/v2/downloads/loclx-{system}-{arch}.zip"
-            
-            # Download location
-            download_path = os.path.join(os.getcwd(), "loclx.zip")
-            bin_dir = os.path.join(os.getcwd(), "bin")
-            os.makedirs(bin_dir, exist_ok=True)
-            
-            # Download
-            import urllib.request
-            logger.info(f"Downloading LocalXpose from {url}")
-            urllib.request.urlretrieve(url, download_path)
-            
-            # Extract
-            import zipfile
-            with zipfile.ZipFile(download_path, 'r') as zip_ref:
-                zip_ref.extractall(bin_dir)
-                
-            # Make executable
-            loclx_path = os.path.join(bin_dir, "loclx")
-            os.chmod(loclx_path, 0o755)
-            
-            # Clean up
-            os.remove(download_path)
-            
-            logger.info(f"LocalXpose downloaded to {loclx_path}")
-            return loclx_path
-        except Exception as e:
-            logger.error(f"Failed to download LocalXpose: {str(e)}")
-            return None
-    
-    return None
-
-def start_tunnel(local_port, subdomain=None):
-    """Start a LocalXpose tunnel to expose a local port."""
-    loclx_path = get_loclx_path()
-    if not loclx_path:
-        error_msg = "Error: LocalXpose executable not found."
-        logger.error(error_msg)
-        return None, error_msg
-        
-    authtoken = os.getenv("LOCALXPOSE_AUTHTOKEN")
-    if not authtoken or authtoken == "your_default_token":
-        error_msg = "Error: LocalXpose authentication token not set. Please set LOCALXPOSE_AUTHTOKEN environment variable."
-        logger.error(error_msg)
-        return None, error_msg
-        
-    # Build command
-    cmd = [loclx_path, "tunnel", "http", "--to", f"localhost:{local_port}"]
-    
-    # Add subdomain if specified
-    if subdomain:
-        cmd.extend(["--subdomain", subdomain])
-        
-    # Add token
-    cmd.extend(["--token", authtoken])
-    
-    try:
-        logger.info(f"Starting LocalXpose tunnel to port {local_port}")
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        process_id = register_process(process, "localxpose_tunnel")
-        
-        # Wait for tunnel URL
-        tunnel_url = None
-        tunnel_error = None
-        max_wait = 30  # seconds
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait:
-            output = process.stdout.readline().strip()
-            if output:
-                logger.info(f"LocalXpose output: {output}")
-                
-                # Look for tunnel URL
-                if "https://" in output:
-                    url_match = re.search(r'(https://[^\s]+)', output)
-                    if url_match:
-                        tunnel_url = url_match.group(1)
-                        logger.info(f"Tunnel established: {tunnel_url}")
-                        break
-                        
-                # Check for errors
-                if "error" in output.lower() or "failed" in output.lower():
-                    tunnel_error = output
-                    logger.error(f"Tunnel error: {tunnel_error}")
-                    break
-            
-            # Check if process is still running
-            if process.poll() is not None:
-                stderr = process.stderr.read()
-                logger.error(f"LocalXpose process terminated: {stderr}")
-                tunnel_error = f"Process terminated: {stderr}"
-                break
-                
-            time.sleep(0.1)
-            
-        if not tunnel_url and not tunnel_error:
-            tunnel_error = "Timed out waiting for tunnel URL"
-            logger.error(tunnel_error)
-            
-        return tunnel_url, tunnel_error
-    except Exception as e:
-        error_msg = f"Exception starting tunnel: {str(e)}"
-        logger.error(error_msg)
-        return None, error_msg
-
-# Call load_queue_tasks at module initialization
+# Load queue tasks at startup
 try:
     load_queue_tasks()
 except Exception as e:
