@@ -54,7 +54,7 @@ def verify_output_path(output_path):
     log_flush()
     return msg
 
-def verify_disk_space(_):
+def verify_disk_space(dummy=None):
     logger.info("Verifying disk space...")
     local_available = get_available_space(os.getcwd())
     msg = f"Available Disk Space: {local_available/1024**3:.2f} GB"
@@ -111,11 +111,12 @@ def system_check():
         messages.append("steamcmd found.")
     else:
         messages.append("steamcmd not found in ./steamcmd")
-    localxpose_path = os.path.join(os.getcwd(), "localxpose", "localxpose")
-    if os.path.exists(localxpose_path):
-        messages.append("LocalXpose found.")
-    else:
-        messages.append("LocalXpose not found in ./localxpose")
+    # Since LocalXpose is installed globally via npm as "loclx", check its availability:
+    try:
+        subprocess.run(["loclx", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        messages.append("LocalXpose (loclx) found.")
+    except Exception:
+        messages.append("LocalXpose (loclx) not found.")
     if shutil.which("7z"):
         messages.append("7z found.")
     else:
@@ -355,7 +356,9 @@ def add_to_queue(username, password, steam_guard_code, anonymous, steam_url, out
 def get_queue_status():
     return "\n".join(queue_status)
 
-def get_downloaded_files(output_path):
+def get_downloaded_files(output_path=None):
+    if not output_path:
+        output_path = os.path.join(os.getcwd(), "output", "game.7z")
     base = output_path
     files = []
     i = 1
@@ -378,17 +381,14 @@ def get_downloaded_files(output_path):
 localxpose_authtoken = os.getenv("LOCALXPOSE_AUTHTOKEN", "your_default_token")
 
 def start_localxpose_http():
-    localxpose_path = os.path.join(os.getcwd(), "localxpose", "localxpose")
-    if not os.path.exists(localxpose_path):
-        print("LocalXpose binary not found at:", localxpose_path)
-        return
-    cmd = [localxpose_path, "tunnel", "http", "--to", "http://localhost:7860", "--authtoken", localxpose_authtoken]
+    # Use the globally installed "loclx" from npm
+    cmd = ["loclx", "tunnel", "http", "--to", "http://localhost:7860", "--authtoken", localxpose_authtoken]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for line in process.stdout:
         print(line, end="")
 
 def start_localxpose_udp(tunnel_type="basic", port=None, to_addr=None, reserved_endpoint=None):
-    cmd = [os.path.join("localxpose", "localxpose"), "tunnel", "udp"]
+    cmd = ["loclx", "tunnel", "udp"]
     if tunnel_type == "custom_port":
         if port:
             cmd += ['--port', str(port)]
@@ -403,8 +403,8 @@ def start_localxpose_udp(tunnel_type="basic", port=None, to_addr=None, reserved_
         print(line, end="")
 
 def start_udp_tunnel(tunnel_type, port, to_addr, reserved_endpoint):
-    p = port.strip() if port.strip() else None
-    t_addr = to_addr.strip() if to_addr.strip() else None
-    r_endpoint = reserved_endpoint.strip() if reserved_endpoint.strip() else None
+    p = port.strip() if port and port.strip() else None
+    t_addr = to_addr.strip() if to_addr and to_addr.strip() else None
+    r_endpoint = reserved_endpoint.strip() if reserved_endpoint and reserved_endpoint.strip() else None
     threading.Thread(target=start_localxpose_udp, args=(tunnel_type, p, t_addr, r_endpoint), daemon=True).start()
     return f"UDP tunnel started with type: {tunnel_type}"
