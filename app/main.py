@@ -72,4 +72,8 @@ with gr.Blocks() as demo:
 # Launch Gradio interface on port 7860
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, share=True, debug=True)
+    urls = demo.launch(server_name="0.0.0.0", server_port=port, share=True, debug=True)
+    share_url = urls.get("share_url")
+    if share_url:
+        # Log the share URL using your logger
+        logger.info(f"Gradio share URL: {share_url}")
