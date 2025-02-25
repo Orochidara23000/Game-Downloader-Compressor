@@ -16,8 +16,10 @@ if [ ! -d "./steamcmd" ]; then
   echo "Downloading SteamCMD..."
   mkdir -p steamcmd
   wget -O steamcmd/steamcmd_linux.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz || { echo "Failed to download SteamCMD"; exit 2; }
+  ls -lh steamcmd/steamcmd_linux.tar.gz  # Debug: show file details
   echo "Extracting SteamCMD..."
   tar -xvzf steamcmd/steamcmd_linux.tar.gz -C steamcmd || { echo "Failed to extract SteamCMD"; exit 2; }
+  ls -l steamcmd  # Debug: list steamcmd directory
   rm steamcmd/steamcmd_linux.tar.gz
 else
   echo "SteamCMD already exists."
@@ -28,8 +30,10 @@ if [ ! -d "./localxpose" ]; then
   echo "Downloading LocalXpose..."
   mkdir -p localxpose
   wget -O localxpose/localxpose.zip https://github.com/localxpose/localxpose/releases/latest/download/localxpose-linux-amd64.zip || { echo "Failed to download LocalXpose"; exit 2; }
+  ls -lh localxpose/localxpose.zip  # Debug: show file details
   echo "Extracting LocalXpose..."
   unzip localxpose/localxpose.zip -d localxpose || { echo "Failed to unzip LocalXpose"; exit 2; }
+  ls -l localxpose  # Debug: list localxpose directory
   rm localxpose/localxpose.zip
   chmod +x localxpose/localxpose
 else
