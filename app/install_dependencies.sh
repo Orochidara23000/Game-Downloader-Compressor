@@ -29,21 +29,6 @@ else
   echo "SteamCMD already exists."
 fi
 
-# Verify LocalXpose (loclx) installation - but don't reinstall as it's done in Dockerfile
-if ! command -v loclx >/dev/null 2>&1; then
-  echo "LocalXpose (loclx) not found in PATH. It should have been installed via Dockerfile."
-  # Check if it exists in the npm global bin directory
-  NPM_BIN=$(npm bin -g)
-  if [ -f "$NPM_BIN/loclx" ]; then
-    echo "LocalXpose found at $NPM_BIN/loclx. Please ensure this path is in your PATH environment variable."
-    echo "Current PATH: $PATH"
-  else
-    echo "Warning: LocalXpose (loclx) not found. The application may not function correctly."
-  fi
-else
-  echo "LocalXpose (loclx) is properly installed."
-fi
-
 # Create required directories
 mkdir -p logs output
 echo "Created required directories."
