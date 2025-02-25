@@ -1,10 +1,7 @@
 import os
 import gradio as gr
 import threading
-from common import start_localxpose_http
-
-# Start the LocalXpose HTTP tunnel in a background thread
-threading.Thread(target=start_localxpose_http, daemon=True).start()
+from common import get_downloaded_files  # Use another function from common if needed
 
 with gr.Blocks() as demo:
     gr.Markdown("# Game Downloader and Compressor - Setup Demo")
