@@ -3,7 +3,7 @@ set -euxo pipefail
 
 echo "Starting install_dependencies.sh script."
 
-# Check if 7z is installed
+# Check if 7z is installed (should be provided by p7zip-full)
 if ! command -v 7z >/dev/null 2>&1; then
   echo "Error: 7z not found. It should have been installed via the Dockerfile."
   exit 1
@@ -16,28 +16,19 @@ if [ ! -d "./steamcmd" ]; then
   echo "Downloading SteamCMD..."
   mkdir -p steamcmd
   wget -O steamcmd/steamcmd_linux.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz || { echo "Failed to download SteamCMD"; exit 2; }
-  ls -lh steamcmd/steamcmd_linux.tar.gz  # Debug: show file details
   echo "Extracting SteamCMD..."
   tar -xvzf steamcmd/steamcmd_linux.tar.gz -C steamcmd || { echo "Failed to extract SteamCMD"; exit 2; }
-  ls -l steamcmd  # Debug: list steamcmd directory
   rm steamcmd/steamcmd_linux.tar.gz
 else
   echo "SteamCMD already exists."
 fi
 
-# Install LocalXpose if not found
-if [ ! -d "./localxpose" ]; then
-  echo "Downloading LocalXpose..."
-  mkdir -p localxpose
-  wget -O localxpose/localxpose.zip https://github.com/localxpose/localxpose/releases/latest/download/localxpose-linux-amd64.zip || { echo "Failed to download LocalXpose"; exit 2; }
-  ls -lh localxpose/localxpose.zip  # Debug: show file details
-  echo "Extracting LocalXpose..."
-  unzip localxpose/localxpose.zip -d localxpose || { echo "Failed to unzip LocalXpose"; exit 2; }
-  ls -l localxpose  # Debug: list localxpose directory
-  rm localxpose/localxpose.zip
-  chmod +x localxpose/localxpose
+# Install LocalXpose using npm (now the package is "loclx")
+if ! command -v loclx >/dev/null 2>&1; then
+  echo "Installing LocalXpose (loclx) via npm..."
+  npm install -g loclx || { echo "Failed to install LocalXpose (loclx)"; exit 2; }
 else
-  echo "LocalXpose already exists."
+  echo "LocalXpose (loclx) is already installed."
 fi
 
 echo "All dependencies installed successfully."
