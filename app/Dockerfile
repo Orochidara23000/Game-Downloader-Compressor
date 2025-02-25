@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g loclx
 
 # Add the global npm bin directory to PATH explicitly
-ENV PATH="/usr/local/bin:$(npm bin -g):$PATH"
+ENV PATH="/usr/local/bin:$PATH"
 
 # Create non-root user for better security
 RUN useradd -m appuser
