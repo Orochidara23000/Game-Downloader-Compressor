@@ -20,6 +20,9 @@ if [ ! -d "./steamcmd" ]; then
   tar -xvzf steamcmd/steamcmd_linux.tar.gz -C steamcmd || { echo "Failed to extract SteamCMD"; exit 2; }
   rm steamcmd/steamcmd_linux.tar.gz
   
+  # Ensure steamcmd.sh is executable
+  chmod +x steamcmd/steamcmd.sh
+  
   # Initial SteamCMD update to ensure it's working
   ./steamcmd/steamcmd.sh +quit || { echo "Failed to run initial SteamCMD update"; exit 3; }
 else
