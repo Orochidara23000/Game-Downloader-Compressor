@@ -245,30 +245,51 @@ def system_check():
     if local_space < 10*1024**3:
         messages.append("WARNING: Less than 10GB available disk space!")
     
-    # Check steamcmd
+    # Check steamcmd with more detailed path info
     steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
+    messages.append(f"Looking for steamcmd at: {steamcmd_path}")
     if os.path.exists(steamcmd_path):
         messages.append("steamcmd found.")
         if os.access(steamcmd_path, os.X_OK):
             messages.append("steamcmd is executable.")
         else:
-            messages.append("WARNING: steamcmd is not executable! Run: chmod +x ./steamcmd/steamcmd.sh")
+            messages.append(f"WARNING: steamcmd is not executable! Permissions: {oct(os.stat(steamcmd_path).st_mode)}")
     else:
-        messages.append("ERROR: steamcmd not found in ./steamcmd")
+        messages.append(f"ERROR: steamcmd not found in {steamcmd_path}")
+        # List directory contents for debugging
+        parent_dir = os.path.dirname(steamcmd_path)
+        if os.path.exists(parent_dir):
+            messages.append(f"Contents of {parent_dir}: {os.listdir(parent_dir)}")
+        else:
+            messages.append(f"Directory {parent_dir} does not exist!")
     
-    # Check 7z
+    # Check 7z with more detailed path info
+    results = []
+    for path in ['/usr/bin/7z', '/usr/local/bin/7z', shutil.which("7z")]:
+        if path:
+            results.append(f"Checking {path}: {os.path.exists(path) if path else 'Not found'}")
+    messages.append("7z path checks: " + ", ".join(results))
+    
     if shutil.which("7z"):
-        messages.append("7z found.")
+        messages.append(f"7z found at {shutil.which('7z')}.")
         try:
             result = subprocess.run(['7z', '--help'], capture_output=True, text=True)
             if result.returncode == 0:
                 messages.append("7z is working correctly.")
             else:
-                messages.append("WARNING: 7z installation may have issues.")
-        except Exception:
-            messages.append("WARNING: 7z is installed but may not be working correctly.")
+                messages.append(f"WARNING: 7z is installed but returned code {result.returncode}.")
+                messages.append(f"Error output: {result.stderr}")
+        except Exception as e:
+            messages.append(f"WARNING: 7z check failed with exception: {str(e)}")
     else:
         messages.append("ERROR: 7z not found.")
+        # Try to locate 7z
+        try:
+            result = subprocess.run(['find', '/', '-name', '7z', '-type', 'f'], capture_output=True, text=True, timeout=10)
+            if result.stdout:
+                messages.append(f"Potential 7z locations: {result.stdout.strip()}")
+        except Exception:
+            messages.append("Could not search for 7z locations.")
     
     # Check for write permissions
     try:
