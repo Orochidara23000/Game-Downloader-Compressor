@@ -77,9 +77,9 @@ if __name__ == "__main__":
     urls = demo.launch(
         server_name="0.0.0.0", 
         server_port=port, 
-        share=not is_railway,  # Don't use Gradio sharing on Railway
+        share=True,  # Always share the Gradio interface
         debug=os.getenv("DEBUG", "false").lower() == "true"
     )
-    # Only log share URL if not on Railway
-    if not is_railway and urls.get("share_url"):
+    # Log share URL regardless of environment
+    if urls.get("share_url"):
         print(f"Gradio share URL: {urls.get('share_url')}")
