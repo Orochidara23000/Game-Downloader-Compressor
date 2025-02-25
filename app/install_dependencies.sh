@@ -4,10 +4,10 @@ set -e
 
 echo "Installing dependencies..."
 
-# Install 7z if not available
+# Check for 7z (should already be installed)
 if ! command -v 7z &> /dev/null; then
-    echo "7z not found. Installing p7zip-full..."
-    apt-get update && apt-get install -y p7zip-full
+    echo "Error: 7z not found. p7zip-full should be installed via the Dockerfile."
+    exit 1
 else
     echo "7z is already installed."
 fi
