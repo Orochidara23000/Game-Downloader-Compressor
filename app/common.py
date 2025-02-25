@@ -804,3 +804,25 @@ try:
     load_queue_tasks()
 except Exception as e:
     logger.error(f"Failed to load queue tasks at startup: {str(e)}")
+
+# === get_downloaded_files Function ===
+def get_downloaded_files(output_path=None):
+    """
+    Return a list of downloaded file parts or the main file if parts are not found.
+    If no output_path is provided, defaults to "./output/game.7z".
+    """
+    if not output_path:
+        output_path = os.path.join(os.getcwd(), "output", "game.7z")
+    base = output_path
+    files = []
+    i = 1
+    while True:
+        part_file = f"{base}.{str(i).zfill(3)}"
+        if os.path.exists(part_file):
+            files.append(part_file)
+            i += 1
+        else:
+            break
+    if not files and os.path.exists(output_path):
+        files.append(output_path)
+    return "\n".join(files) if files else "No downloaded files found."
