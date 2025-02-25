@@ -1,4 +1,5 @@
 #!/bin/bash
+set -ex
 set -e
 
 echo "Installing dependencies..."
