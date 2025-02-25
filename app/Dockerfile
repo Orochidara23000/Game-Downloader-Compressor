@@ -1,3 +1,4 @@
+RUN apt-get update && apt-get install -y lib32stdc++6 wget unzip tar ca-certificates
 # Use a lightweight Python image
 FROM python:3.11-slim
 
