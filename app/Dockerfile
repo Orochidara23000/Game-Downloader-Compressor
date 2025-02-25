@@ -8,7 +8,7 @@ WORKDIR /app
 COPY . /app
 
 # Make sure our installation script is executable
-RUN chmod +x install_dependencies.sh && ./install_dependencies.sh
+RUN chmod +x install_dependencies.sh && bash install_dependencies.sh
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
