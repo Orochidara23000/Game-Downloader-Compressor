@@ -826,3 +826,15 @@ def get_downloaded_files(output_path=None):
     if not files and os.path.exists(output_path):
         files.append(output_path)
     return "\n".join(files) if files else "No downloaded files found."
+
+# Existing rotating file handler
+handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5, delay=False)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+# Add a stream handler to output logs to stdout
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
+
