@@ -12,8 +12,16 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY . /app
 
-# Install dependencies using our script
-RUN chmod +x install_dependencies.sh && bash install_dependencies.sh
+# Modified approach: Install dependencies directly in Dockerfile 
+# instead of using the install_dependencies.sh script
+RUN mkdir -p /app/logs /app/output /app/game /app/steamcmd && \
+    chmod 755 /app/logs /app/output /app/game && \
+    cd /app/steamcmd && \
+    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && \
+    tar -xzf steamcmd_linux.tar.gz && \
+    rm steamcmd_linux.tar.gz && \
+    chmod +x steamcmd.sh && \
+    ./steamcmd.sh +quit || echo "SteamCMD initial setup completed with warnings"
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -23,9 +31,6 @@ RUN useradd -m appuser && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
-
-# Create required directories with proper permissions
-RUN mkdir -p /app/logs /app/output /app/game && chmod 755 /app/logs /app/output /app/game
 
 # Expose the application port
 EXPOSE 7860
