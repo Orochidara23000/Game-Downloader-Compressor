@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install required packages including nodejs and npm
+# Install system dependencies including Node.js and npm
 RUN apt-get update && apt-get install -y \
       lib32stdc++6 \
       wget \
@@ -11,13 +11,18 @@ RUN apt-get update && apt-get install -y \
       nodejs \
       npm
 
+# Install loclx globally via npm
+RUN npm install -g loclx
+
+# Add the global npm bin directory to PATH.
+# This makes sure that the 'loclx' binary can be found.
+ENV PATH="$(npm bin -g):$PATH"
+
 WORKDIR /app
 COPY . /app
 
-# Run the installation script to install SteamCMD and LocalXpose (via npm)
 RUN chmod +x install_dependencies.sh && bash install_dependencies.sh
 
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 7860
