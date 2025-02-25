@@ -1,35 +1,21 @@
-FROM python:3.11-slim
+import os
+import gradio as gr
+import threading
+from common import get_downloaded_files  # Use another function from common if needed
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-      lib32stdc++6 \
-      wget \
-      unzip \
-      tar \
-      ca-certificates \
-      p7zip-full
+with gr.Blocks() as demo:
+    gr.Markdown("# Game Downloader and Compressor - Setup Demo")
+    def greet(name):
+        return f"Hello, {name}!"
+    gr.Interface(fn=greet, inputs="text", outputs="text").render()
 
-WORKDIR /app
-COPY . /app
-
-# Install dependencies using our script
-RUN chmod +x install_dependencies.sh && bash install_dependencies.sh
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Create non-root user for better security
-RUN useradd -m appuser && chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
-# Create required directories with proper permissions
-RUN mkdir -p /app/logs /app/output /app/game && chmod 755 /app/logs /app/output /app/game
-
-# Expose the application port
-EXPOSE 7860
-
-# Use a proper entrypoint script for startup
-COPY --chmod=0755 start.sh /app/start.sh
-CMD ["/app/start.sh"]
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 7860))
+    # Only use share=True in development, not in Railway
+    is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None
+    demo.launch(
+        server_name="0.0.0.0", 
+        server_port=port, 
+        share=True,  # Always share the Gradio interface
+        debug=os.getenv("DEBUG", "false").lower() == "true"
+    )
