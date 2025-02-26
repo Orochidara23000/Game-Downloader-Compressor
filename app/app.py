@@ -10,6 +10,7 @@ import shutil
 import re
 import tempfile
 import glob
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,28 @@ try:
     logger.info(f"Gradio version: {gr.__version__}")
 except:
     logger.info("Could not determine Gradio version")
+
+# Global variables to track download state
+DOWNLOAD_STATE = {
+    "app_id": None,
+    "username": "anonymous",
+    "platform": "windows",
+    "in_progress": False,
+    "completed": False,
+    "last_progress": 0
+}
+
+# Define list of free games that work with anonymous login
+FREE_GAMES = [
+    {"name": "Team Fortress 2", "app_id": "440", "platform": "windows/linux"},
+    {"name": "Dota 2", "app_id": "570", "platform": "windows/linux/macos"},
+    {"name": "Counter-Strike 2", "app_id": "730", "platform": "windows/linux"},
+    {"name": "Path of Exile", "app_id": "238960", "platform": "windows"},
+    {"name": "Warframe", "app_id": "230410", "platform": "windows"},
+    {"name": "Destiny 2", "app_id": "1085660", "platform": "windows"},
+    {"name": "Apex Legends", "app_id": "1172470", "platform": "windows"},
+    {"name": "War Thunder", "app_id": "236390", "platform": "windows/linux/macos"}
+]
 
 def install_steamcmd():
     """Install SteamCMD properly with all required dependencies"""
@@ -122,18 +145,6 @@ def system_health_check():
         error_msg = f"Error during health check: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
         return error_msg
-
-# List of free games that work with anonymous login
-FREE_GAMES = [
-    {"name": "Team Fortress 2", "app_id": "440", "platform": "windows,linux,macos"},
-    {"name": "Dota 2", "app_id": "570", "platform": "windows,linux,macos"},
-    {"name": "Counter-Strike 2", "app_id": "730", "platform": "windows,linux,macos"},
-    {"name": "Unturned", "app_id": "304930", "platform": "windows,linux,macos"}, 
-    {"name": "War Thunder", "app_id": "236390", "platform": "windows,linux,macos"},
-    {"name": "Path of Exile", "app_id": "238960", "platform": "windows"},
-    {"name": "Destiny 2", "app_id": "1085660", "platform": "windows"},
-    {"name": "PUBG: BATTLEGROUNDS", "app_id": "578080", "platform": "windows"}
-]
 
 def extract_app_id(input_text):
     """Extract app ID from text or URL"""
@@ -674,26 +685,36 @@ try:
     logger.info("Creating Gradio interface...")
     
     with gr.Blocks(title="Steam Game Downloader & Compressor") as demo:
-        gr.Markdown("# Steam Game Downloader & Compressor")
-        gr.Markdown("Download games from Steam and compress them for easy transfer")
+        gr.Markdown("# 🎮 Steam Game Downloader & Compressor")
+        gr.Markdown("Download games from Steam, compress them for easy transfer, and download the compressed files")
+        
+        # Download status display at the top - define it here so it's available to all tabs
+        download_status = gr.Textbox(
+            value=get_download_progress(),
+            label="Download Status",
+            interactive=False
+        )
+        
+        # Download status auto-refresh
+        download_status.change(fn=get_download_progress, inputs=None, outputs=download_status, every=5)
         
         with gr.Tab("System Status"):
             status_output = gr.Textbox(
                 value=system_health_check(),
                 label="System Status",
-                lines=8,
+                lines=12,
                 interactive=False
             )
-            refresh_btn = gr.Button("Refresh Status")
+            refresh_btn = gr.Button("🔄 Refresh Status")
             refresh_btn.click(fn=system_health_check, inputs=None, outputs=status_output)
             
-            install_btn = gr.Button("Install/Repair SteamCMD")
+            install_btn = gr.Button("🛠️ Install/Repair SteamCMD")
             install_output = gr.Textbox(label="Installation Output", lines=10)
             install_btn.click(fn=install_steamcmd, inputs=None, outputs=install_output)
         
         with gr.Tab("Download Game"):
             gr.Markdown("""
-            ## Steam Login & Download
+            ## 🚀 Steam Login & Download
             
             You can download games in two ways:
             1. **Anonymous login** - Only works for free-to-play games
