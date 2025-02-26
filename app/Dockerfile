@@ -2,11 +2,10 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (removed 7zip and other compression tools)
 RUN apt-get update && apt-get install -y \
     lib32gcc-s1 \
-    dos2unix \
-    p7zip-full \
+    wget \
     curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -14,26 +13,12 @@ RUN apt-get update && apt-get install -y \
 # Copy application files
 COPY . .
 
-# Convert Windows line endings to Unix for shell scripts
-RUN find /app -type f -name "*.sh" -exec dos2unix {} \; || echo "No shell scripts found or dos2unix failed"
-
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Make scripts executable
-RUN chmod +x /app/start.sh /app/install_dependencies.sh
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/downloads /app/steamcmd && \
     chmod -R 755 /app/logs /app/downloads /app/steamcmd
-
-# Install SteamCMD
-RUN ./install_dependencies.sh
-
-# Create symlinks for convenience
-RUN if [ ! -e /usr/local/bin/steamcmd ] && [ -e /app/steamcmd/steamcmd.sh ]; then \
-    ln -sf /app/steamcmd/steamcmd.sh /usr/local/bin/steamcmd; \
-    fi
 
 # Expose the application port
 EXPOSE 7860
