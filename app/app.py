@@ -7,6 +7,7 @@ import subprocess
 import traceback
 import threading
 import shutil
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -120,20 +121,49 @@ def system_health_check():
         logger.error(error_msg)
         return error_msg
 
+# List of free games that work with anonymous login
+FREE_GAMES = [
+    {"name": "Team Fortress 2", "app_id": "440"},
+    {"name": "Dota 2", "app_id": "570"},
+    {"name": "Counter-Strike 2", "app_id": "730"},
+    {"name": "Unturned", "app_id": "304930"},
+    {"name": "War Thunder", "app_id": "236390"},
+    {"name": "Path of Exile", "app_id": "238960"},
+    {"name": "Destiny 2", "app_id": "1085660"},
+    {"name": "PUBG: BATTLEGROUNDS", "app_id": "578080"}
+]
+
+def extract_app_id(input_text):
+    """Extract app ID from text or URL"""
+    # Look for app ID in URLs
+    url_match = re.search(r'store\.steampowered\.com/app/(\d+)', input_text)
+    if url_match:
+        return url_match.group(1)
+    
+    # Look for just numbers
+    num_match = re.search(r'^\s*(\d+)\s*$', input_text)
+    if num_match:
+        return num_match.group(1)
+    
+    # Return None if no app ID found
+    return None
+
 def run_steamcmd_command(app_id, username="anonymous"):
     """Run SteamCMD to download a game by app_id"""
     try:
-        # First make sure we have numbers only for app_id
-        # Strip any URLs or other text to get just the app ID number
-        import re
-        app_id_match = re.search(r'(\d+)', app_id)
-        if app_id_match:
-            app_id = app_id_match.group(1)
-        else:
-            yield "Invalid app ID. Please enter a numeric Steam app ID."
+        # Extract app ID if needed
+        clean_app_id = extract_app_id(app_id)
+        if not clean_app_id:
+            yield "⚠️ Invalid app ID. Please enter a numeric Steam app ID or Steam store URL."
             return
             
+        app_id = clean_app_id
         logger.info(f"Starting download for App ID: {app_id}")
+        
+        # Check if anonymous login is being used
+        is_anonymous = username.lower() == "anonymous"
+        if is_anonymous:
+            yield f"ℹ️ Using anonymous login. Only free-to-play games can be downloaded this way.\n"
         
         # Create command
         output_dir = "/app/game"
@@ -143,22 +173,24 @@ def run_steamcmd_command(app_id, username="anonymous"):
         # Check if SteamCMD is working
         steamcmd_path = "/app/steamcmd/steamcmd.sh"
         if not os.path.exists(steamcmd_path):
-            yield "SteamCMD not installed. Installing now..."
+            yield "🔄 SteamCMD not installed. Installing now..."
             result = install_steamcmd()
             yield result
             
             if "failed" in result.lower():
-                yield "Cannot proceed with download as SteamCMD installation failed."
+                yield "❌ Cannot proceed with download as SteamCMD installation failed."
                 return
         
         # Build SteamCMD command
         cmd = [
             "/app/steamcmd/steamcmd.sh",
-            "+login", username,
             "+force_install_dir", output_dir,
+            "+login", username,
             "+app_update", str(app_id),
             "+quit"
         ]
+        
+        yield f"🚀 Starting download for App ID: {app_id}\n\n"
         
         # Execute command with real-time output capture
         process = subprocess.Popen(
@@ -184,12 +216,68 @@ def run_steamcmd_command(app_id, username="anonymous"):
         
         # Check result
         if return_code != 0:
-            yield f"\n\nDownload failed with exit code {return_code}"
+            yield f"\n\n❌ Download failed with exit code {return_code}"
+            
+            # Special handling for common errors
+            if "No subscription" in "\n".join(output_lines) and is_anonymous:
+                yield "\n\n⚠️ Error: No subscription. This game requires a valid Steam account and cannot be downloaded anonymously. Please use your Steam username instead of 'anonymous'."
         else:
-            yield "\n\nDownload completed successfully!"
+            yield "\n\n✅ Download completed successfully!"
             
     except Exception as e:
         error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        yield f"❌ {error_msg}"
+
+def compress_game_files():
+    """Compress downloaded game files using 7zip"""
+    try:
+        game_dir = "/app/game"
+        output_dir = "/app/output"
+        
+        if not os.path.exists(game_dir) or not os.listdir(game_dir):
+            return "No game files to compress. Please download a game first."
+        
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        # Create timestamp for filename
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        output_file = f"{output_dir}/game_files_{timestamp}.7z"
+        
+        yield f"Starting compression of game files to {output_file}..."
+        
+        # Execute 7zip command with ultra compression
+        cmd = ["7z", "a", "-t7z", "-m0=lzma2", "-mx=9", "-aoa", output_file, f"{game_dir}/*"]
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        # Collect output
+        for line in iter(process.stdout.readline, ''):
+            yield f"{line.strip()}\n"
+        
+        # Get final exit code
+        process.stdout.close()
+        return_code = process.wait()
+        
+        # Check result
+        if return_code != 0:
+            yield f"Compression failed with exit code {return_code}"
+        else:
+            # Get file size
+            size_bytes = os.path.getsize(output_file)
+            size_mb = size_bytes / (1024 * 1024)
+            
+            yield f"Compression completed successfully!\nOutput file: {output_file}\nSize: {size_mb:.2f} MB"
+    
+    except Exception as e:
+        error_msg = f"Error during compression: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
         yield error_msg
 
@@ -219,6 +307,32 @@ def list_downloaded_files():
         logger.error(error_msg)
         return error_msg
 
+def list_compressed_files():
+    """List compressed output files"""
+    try:
+        output_dir = "/app/output"
+        if not os.path.exists(output_dir):
+            return "No compressed files exist yet."
+            
+        file_list = []
+        total_size = 0
+        
+        for file in os.listdir(output_dir):
+            if file.endswith('.7z'):
+                file_path = os.path.join(output_dir, file)
+                size = os.path.getsize(file_path)
+                total_size += size
+                file_list.append(f"{file} - {size/1024**2:.2f} MB")
+        
+        if not file_list:
+            return "No compressed files found."
+            
+        return f"Total compressed files: {len(file_list)}\nTotal size: {total_size/1024**3:.2f} GB\n\n" + "\n".join(file_list)
+    except Exception as e:
+        error_msg = f"Error listing compressed files: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
 # Function to keep the container alive in a separate thread
 def keep_alive_thread():
     while True:
@@ -232,9 +346,9 @@ threading.Thread(target=keep_alive_thread, daemon=True).start()
 try:
     logger.info("Creating Gradio interface...")
     
-    with gr.Blocks(title="Steam Game Downloader") as demo:
-        gr.Markdown("# Steam Game Downloader")
-        gr.Markdown("Download games from Steam using SteamCMD")
+    with gr.Blocks(title="Steam Game Downloader & Compressor") as demo:
+        gr.Markdown("# Steam Game Downloader & Compressor")
+        gr.Markdown("Download games from Steam and compress them for easy transfer")
         
         with gr.Tab("System Status"):
             status_output = gr.Textbox(
@@ -251,21 +365,30 @@ try:
             install_btn.click(fn=install_steamcmd, inputs=None, outputs=install_output)
         
         with gr.Tab("Download Game"):
+            gr.Markdown("""
+            ## How to Download Games
+            
+            1. Enter the Steam App ID in the box below, or paste a Steam store URL
+            2. Free-to-play games can be downloaded with "anonymous" as username
+            3. Paid games require a valid Steam account login
+            
+            ### Free Games That Work With Anonymous Login:
+            """)
+            
+            # Create a markdown table of free games
+            free_games_md = "| Game | App ID |\n|------|--------|\n"
+            for game in FREE_GAMES:
+                free_games_md += f"| {game['name']} | {game['app_id']} |\n"
+            
+            gr.Markdown(free_games_md)
+            
             with gr.Row():
                 app_id = gr.Textbox(
-                    label="Steam App ID (e.g. 230410 for Warframe)", 
+                    label="Steam App ID or URL", 
                     value="",
-                    placeholder="Enter numeric App ID or paste Steam store URL"
+                    placeholder="e.g. 440 or https://store.steampowered.com/app/440/Team_Fortress_2/"
                 )
-                username = gr.Textbox(label="Steam Username (or anonymous)", value="anonymous")
-            
-            gr.Markdown("""
-            ## How to find the App ID
-            1. Go to the Steam store page for the game
-            2. The App ID is the number in the URL: https://store.steampowered.com/app/XXXXXX/
-            3. Free games can be downloaded with the anonymous account
-            4. Paid games require a valid Steam login
-            """)
+                username = gr.Textbox(label="Steam Username", value="anonymous")
             
             download_btn = gr.Button("Download Game")
             download_output = gr.Textbox(label="Download Progress", lines=15)
@@ -276,10 +399,36 @@ try:
                 outputs=download_output
             )
         
+        with gr.Tab("Compress Files"):
+            gr.Markdown("""
+            ## Compress Downloaded Game Files
+            
+            Use this tab to compress downloaded game files using 7zip with maximum compression.
+            The compressed file will be stored in the /app/output directory.
+            """)
+            
+            compress_btn = gr.Button("Compress Game Files")
+            compress_output = gr.Textbox(label="Compression Progress", lines=15)
+            
+            compress_btn.click(
+                fn=compress_game_files,
+                inputs=None,
+                outputs=compress_output
+            )
+        
         with gr.Tab("File Browser"):
-            file_output = gr.Textbox(label="Downloaded Files", lines=20)
-            list_btn = gr.Button("List Downloaded Files")
-            list_btn.click(fn=list_downloaded_files, inputs=None, outputs=file_output)
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### Downloaded Game Files")
+                    game_files_output = gr.Textbox(label="Game Files", lines=20)
+                    list_game_btn = gr.Button("List Downloaded Game Files")
+                    list_game_btn.click(fn=list_downloaded_files, inputs=None, outputs=game_files_output)
+                
+                with gr.Column():
+                    gr.Markdown("### Compressed Output Files")
+                    compressed_files_output = gr.Textbox(label="Compressed Files", lines=20)
+                    list_compressed_btn = gr.Button("List Compressed Files")
+                    list_compressed_btn.click(fn=list_compressed_files, inputs=None, outputs=compressed_files_output)
     
     # Launch the demo
     logger.info("Launching Gradio app...")
