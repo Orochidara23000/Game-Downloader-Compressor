@@ -21,11 +21,11 @@ RUN mkdir -p /app/logs /app/downloads /app/steamcmd && \
     chmod -R 755 /app/logs /app/downloads /app/steamcmd
 
 # Expose the application port
-EXPOSE 7860
+EXPOSE 8080
 
 # Set a healthcheck
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:7860/ || exit 1
+  CMD curl -f http://localhost:8080/ || exit 1
 
 # Start the application
 CMD ["python", "app.py"]
