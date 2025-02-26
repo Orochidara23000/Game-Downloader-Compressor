@@ -187,19 +187,66 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
         output_dir = "/app/game"
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Download directory: {output_dir}")
+        
+        # For non-anonymous login, we'll use direct command line arguments
+        # rather than a script file to avoid writing credentials to disk
+        if is_anonymous:
+            # Create a script file for anonymous login
+            script_content = f"""@ShutdownOnFailedCommand 1
+@NoPromptForPassword 1
+force_install_dir {output_dir}
+login anonymous
+"""
+            if platform.lower() != "linux":
+                script_content += f"@sSteamCmdForcePlatformType {platform}\n"
+                
+            script_content += f"app_update {app_id} validate\n"
+            script_content += "quit\n"
             
-        # Create the script file
-        script_file = create_steam_script(username, password, app_id, output_dir, platform)
-        logger.info(f"Created SteamCMD script file: {script_file}")
-        yield f"ℹ️ Created SteamCMD script with platform set to {platform}.\n"
-        
-        # Log the command being executed (without credentials)
-        logger.info(f"Executing SteamCMD with script to download App ID: {app_id}")
-        
-        try:
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.txt', mode='w') as f:
+                f.write(script_content)
+                script_file = f.name
+                
+            logger.info(f"Created SteamCMD script file for anonymous login: {script_file}")
+            yield f"ℹ️ Created SteamCMD script with platform set to {platform} for anonymous login.\n"
+            
             # Execute SteamCMD with the script
             cmd = ["/app/steamcmd/steamcmd.sh", "+runscript", script_file]
+        else:
+            # For authenticated login, pass credentials directly on command line
+            cmd = [
+                "/app/steamcmd/steamcmd.sh",
+                "+force_install_dir", output_dir
+            ]
             
+            # Add platform setting if needed
+            if platform.lower() != "linux":
+                cmd.extend(["+@sSteamCmdForcePlatformType", platform])
+                
+            # Add login credentials
+            if steam_guard:
+                cmd.extend(["+login", username, password, steam_guard])
+            else:
+                cmd.extend(["+login", username, password])
+                
+            # Add app update command and quit
+            cmd.extend(["+app_update", app_id, "validate", "+quit"])
+            
+            logger.info(f"Using direct command line for authenticated login (credentials redacted)")
+            yield f"ℹ️ Using direct authentication with platform set to {platform}.\n"
+        
+        # Log the command being executed (without credentials for security)
+        sanitized_cmd = cmd.copy()
+        if not is_anonymous and len(sanitized_cmd) > 5:
+            # Redact password in logs
+            password_index = sanitized_cmd.index("+login") + 2
+            if password_index < len(sanitized_cmd):
+                sanitized_cmd[password_index] = "******"
+        
+        logger.info(f"Executing SteamCMD command: {' '.join(sanitized_cmd)}")
+        
+        try:
             # Add periodic status updates
             download_start_time = time.time()
             
@@ -211,13 +258,14 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
                 bufsize=1
             )
             
-            # Variables to track Steam Guard request
-            needs_steam_guard = False
-            
             # Collect output
             output_lines = []
             line_count = 0
             for line in iter(process.stdout.readline, ''):
+                # Skip lines that might contain credentials
+                if username.lower() != "anonymous" and username in line and "password" in line.lower():
+                    continue
+                    
                 line_count += 1
                 output_lines.append(line.strip())
                 if len(output_lines) > 100:  # Keep only last 100 lines
@@ -227,26 +275,6 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
                 if line_count % 20 == 0:
                     elapsed_time = time.time() - download_start_time
                     logger.info(f"Download in progress for {elapsed_time:.1f} seconds. Last output: {line.strip()}")
-                
-                # Check for Steam Guard request
-                if "Steam Guard code:" in line or "Two-factor code:" in line:
-                    needs_steam_guard = True
-                    logger.info("Steam Guard code requested")
-                    if steam_guard:
-                        # Send the provided Steam Guard code
-                        process.stdin.write(f"{steam_guard}\n")
-                        process.stdin.flush()
-                        logger.info("Submitted Steam Guard code")
-                        output_lines.append(f"Submitted Steam Guard code: {steam_guard}")
-                    else:
-                        logger.warning("Steam Guard code required but not provided")
-                        output_lines.append("⚠️ Steam Guard code required but not provided!")
-                
-                # Check for platform error and provide helpful message
-                if "Invalid platform" in line:
-                    logger.error(f"Invalid platform detected: {platform}")
-                    output_lines.append("⚠️ This game doesn't support the selected platform.")
-                    output_lines.append("Try changing the platform to 'windows' in the advanced settings.")
                 
                 # Log progress indicators
                 if "Update state" in line or "%" in line:
@@ -264,7 +292,11 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
             
             # Check result
             if return_code != 0:
-                if "Invalid platform" in "\n".join(output_lines):
+                if return_code == 5:
+                    logger.error(f"Authentication failed for user: {username} (Exit code 5)")
+                    yield "\n\n⚠️ Authentication failed. Please check your username and password."
+                    yield "If you're using Steam Guard, make sure to enter the correct code."
+                elif "Invalid platform" in "\n".join(output_lines):
                     logger.error(f"Download failed: Game not available for platform: {platform}")
                     yield "\n\n⚠️ Download failed: Game not available for the selected platform."
                     yield "Please try again with platform set to 'windows'."
@@ -276,8 +308,10 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
                 yield "\n\n✅ Download completed successfully!"
                 
         finally:
-            # Clean up the temporary script file
-            if os.path.exists(script_file):
+            # Clean up the temporary script file if it exists
+            if not is_anonymous:
+                logger.info("No script file to clean up (using direct authentication)")
+            elif 'script_file' in locals() and os.path.exists(script_file):
                 os.unlink(script_file)
                 logger.info(f"Cleaned up script file: {script_file}")
                 
