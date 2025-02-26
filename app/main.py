@@ -44,13 +44,13 @@ with gr.Blocks() as demo:
         resume_checkbox = gr.Checkbox(label="Resume Download (if already started)", value=False)
         download_status = gr.Textbox(label="Status Updates", lines=10)
         download_error = gr.Textbox(label="Error Messages", lines=5)
-        direct_download_btn = gr.Button("Direct Download and Compress")
+        # direct_download_btn = gr.Button("Direct Download and Compress")
         queue_download_btn = gr.Button("Add to Queue")
-        direct_download_btn.click(
-            fn=lambda u, p, s, a, url, r: download_and_compress_from_url(u, p, s, a, url, default_output_path, r),
-            inputs=[username_input, password_input, steam_guard_input, anonymous_checkbox_dl, steam_url_input, resume_checkbox],
-            outputs=[download_status, download_error]
-        )
+        # direct_download_btn.click(
+        #     fn=lambda u, p, s, a, url, r: download_and_compress_from_url(u, p, s, a, url, default_output_path, r),
+        #     inputs=[username_input, password_input, steam_guard_input, anonymous_checkbox_dl, steam_url_input, resume_checkbox],
+        #     outputs=[download_status, download_error]
+        # )
         queue_download_btn.click(
             fn=lambda u, p, s, a, url, r: add_to_queue(u, p, s, a, url, default_output_path, r),
             inputs=[username_input, password_input, steam_guard_input, anonymous_checkbox_dl, steam_url_input, resume_checkbox],
