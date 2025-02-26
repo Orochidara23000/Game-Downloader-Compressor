@@ -2,24 +2,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install essential dependencies
+# Add support for 32-bit libraries
+RUN dpkg --add-architecture i386
+
+# Install essential dependencies including SteamCMD requirements
 RUN apt-get update && apt-get install -y \
     p7zip-full \
     wget \
     curl \
+    lib32gcc-s1 \
+    lib32stdc++6 \
+    libsdl2-2.0-0:i386 \
+    libtinfo5:i386 \
     && apt-get clean
 
 # Install only the required Python packages
 RUN pip install --no-cache-dir gradio
 
-# Create required directories and setup steamcmd
-RUN mkdir -p /app/steamcmd && \
-    mkdir -p /app/logs /app/output /app/game && \
-    cd /app/steamcmd && \
-    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && \
-    tar -xzf steamcmd_linux.tar.gz && \
-    rm steamcmd_linux.tar.gz && \
-    chmod +x steamcmd.sh
+# Create required directories
+RUN mkdir -p /app/logs /app/output /app/game
 
 # Copy only the essential app file
 COPY app.py /app/
