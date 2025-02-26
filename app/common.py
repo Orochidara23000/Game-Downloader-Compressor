@@ -245,33 +245,61 @@ def system_check():
     if local_space < 10*1024**3:
         messages.append("WARNING: Less than 10GB available disk space!")
     
-    # Check steamcmd with more detailed path info
-    steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
-    messages.append(f"Looking for steamcmd at: {steamcmd_path}")
-    if os.path.exists(steamcmd_path):
-        messages.append("steamcmd found.")
-        if os.access(steamcmd_path, os.X_OK):
-            messages.append("steamcmd is executable.")
-        else:
-            messages.append(f"WARNING: steamcmd is not executable! Permissions: {oct(os.stat(steamcmd_path).st_mode)}")
-    else:
-        messages.append(f"ERROR: steamcmd not found in {steamcmd_path}")
-        # List directory contents for debugging
-        parent_dir = os.path.dirname(steamcmd_path)
-        if os.path.exists(parent_dir):
-            messages.append(f"Contents of {parent_dir}: {os.listdir(parent_dir)}")
-        else:
-            messages.append(f"Directory {parent_dir} does not exist!")
+    # Check for steamcmd in multiple locations
+    steamcmd_paths = [
+        os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh"),
+        "/app/steamcmd/steamcmd.sh",
+        "/usr/local/bin/steamcmd",
+        shutil.which("steamcmd")
+    ]
     
-    # Check 7z with more detailed path info
-    results = []
-    for path in ['/usr/bin/7z', '/usr/local/bin/7z', shutil.which("7z")]:
-        if path:
-            results.append(f"Checking {path}: {os.path.exists(path) if path else 'Not found'}")
-    messages.append("7z path checks: " + ", ".join(results))
+    messages.append("Checking for steamcmd in multiple locations:")
+    found_steamcmd = False
     
-    if shutil.which("7z"):
-        messages.append(f"7z found at {shutil.which('7z')}.")
+    for path in steamcmd_paths:
+        if path and os.path.exists(path):
+            messages.append(f"steamcmd found at: {path}")
+            found_steamcmd = True
+            if os.access(path, os.X_OK):
+                messages.append(f"steamcmd at {path} is executable.")
+            else:
+                messages.append(f"WARNING: steamcmd at {path} is not executable. Fixing permissions...")
+                try:
+                    os.chmod(path, 0o755)
+                    messages.append(f"Permissions fixed for {path}")
+                except Exception as e:
+                    messages.append(f"Failed to fix permissions: {str(e)}")
+    
+    if not found_steamcmd:
+        messages.append("ERROR: steamcmd not found in any expected location.")
+        # Try to find it anywhere on the system
+        try:
+            result = subprocess.run(['find', '/', '-name', 'steamcmd.sh', '-type', 'f'], 
+                                   capture_output=True, text=True, timeout=10)
+            if result.stdout:
+                messages.append(f"Potential steamcmd locations: {result.stdout.strip()}")
+                # Try to create a symlink to the first found location
+                first_found = result.stdout.strip().split('\n')[0]
+                try:
+                    os.symlink(first_found, '/usr/local/bin/steamcmd')
+                    messages.append(f"Created symlink from {first_found} to /usr/local/bin/steamcmd")
+                except Exception as e:
+                    messages.append(f"Failed to create symlink: {str(e)}")
+        except Exception as e:
+            messages.append(f"Failed to search for steamcmd: {str(e)}")
+    
+    # Check for 7z in multiple locations
+    sevenzip_paths = ['/usr/bin/7z', '/bin/7z', '/usr/local/bin/7z', shutil.which("7z")]
+    messages.append("Checking for 7z in multiple locations:")
+    found_7z = False
+    
+    for path in sevenzip_paths:
+        if path and os.path.exists(path):
+            messages.append(f"7z found at: {path}")
+            found_7z = True
+            break
+    
+    if found_7z:
         try:
             result = subprocess.run(['7z', '--help'], capture_output=True, text=True)
             if result.returncode == 0:
@@ -282,14 +310,21 @@ def system_check():
         except Exception as e:
             messages.append(f"WARNING: 7z check failed with exception: {str(e)}")
     else:
-        messages.append("ERROR: 7z not found.")
-        # Try to locate 7z
+        messages.append("ERROR: 7z not found in any expected location.")
+        # Try to install 7zip if not found
         try:
-            result = subprocess.run(['find', '/', '-name', '7z', '-type', 'f'], capture_output=True, text=True, timeout=10)
-            if result.stdout:
-                messages.append(f"Potential 7z locations: {result.stdout.strip()}")
-        except Exception:
-            messages.append("Could not search for 7z locations.")
+            messages.append("Attempting to install 7zip...")
+            result = subprocess.run(['apt-get', 'update'], capture_output=True, text=True)
+            install_result = subprocess.run(['apt-get', 'install', '-y', 'p7zip-full'], 
+                                           capture_output=True, text=True)
+            if install_result.returncode == 0:
+                messages.append("7zip installation successful.")
+                if shutil.which("7z"):
+                    messages.append(f"7z now found at: {shutil.which('7z')}")
+            else:
+                messages.append(f"7zip installation failed: {install_result.stderr}")
+        except Exception as e:
+            messages.append(f"Failed to install 7zip: {str(e)}")
     
     # Check for write permissions
     try:
