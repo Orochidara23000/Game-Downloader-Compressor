@@ -15,6 +15,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Let's log Gradio version
+try:
+    logger.info(f"Gradio version: {gr.__version__}")
+except:
+    logger.info("Could not determine Gradio version")
+
 def system_health_check():
     """Basic system health check that runs on startup"""
     try:
@@ -52,41 +58,10 @@ def update_status():
     health_status = system_health_check()
     return f"Server running at {timestamp}\n\n{health_status}"
 
-# Create a very simple Gradio app
-logger.info("Initializing Gradio app")
-with gr.Blocks(title="Railway App") as demo:
-    gr.Markdown("# Railway App - Minimal Demo")
-    
-    status_box = gr.Textbox(
-        label="System Status",
-        value="Starting...",
-        lines=10,
-        interactive=False
-    )
-    
-    # Add a refresh button instead of automatic updates
-    refresh_btn = gr.Button("Refresh Status")
-    refresh_btn.click(fn=update_status, inputs=None, outputs=status_box)
-    
-    # Update status initially
-    demo.load(update_status, None, [status_box])
-    
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("## Test Connection")
-            name_input = gr.Textbox(label="Your Name", value="User")
-            greet_output = gr.Textbox(label="Response")
-            
-            def greet(name):
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                logger.info(f"Greeting user: {name}")
-                return f"Hello, {name}! Server is up and running at {timestamp}."
-            
-            gr.Button("Test Connection").click(
-                fn=greet, 
-                inputs=[name_input], 
-                outputs=[greet_output]
-            )
+def greet(name):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    logger.info(f"Greeting user: {name}")
+    return f"Hello, {name}! Server is up and running at {timestamp}."
 
 # Function to keep the container alive in a separate thread
 def keep_alive_thread():
@@ -97,30 +72,32 @@ def keep_alive_thread():
 # Start the keep-alive thread
 threading.Thread(target=keep_alive_thread, daemon=True).start()
 
-# Launch the app
+# Launch the app - using the simplest interface possible for maximum compatibility
 try:
+    logger.info("Creating simple Gradio interface...")
+    
+    # Create a much simpler interface
+    iface = gr.Interface(
+        fn=greet,
+        inputs="text",
+        outputs="text",
+        title="Railway App - Running",
+        description="This app is running successfully in Railway! SteamCMD and 7zip are installed."
+    )
+    
     logger.info("Launching Gradio app...")
     port = int(os.getenv("PORT", 7860))
     
-    # Improved queue settings
-    demo.queue(concurrency_count=5)
-    demo.launch(
+    # Use minimal launch parameters
+    iface.launch(
         server_name="0.0.0.0",
         server_port=port,
-        share=True,
-        debug=True,
-        show_error=True
+        share=True
     )
     
-    # This code should never be reached in normal operation
-    logger.warning("Gradio launch exited unexpectedly, entering backup loop")
-    while True:
-        time.sleep(60)
-        logger.info("Backup keep-alive loop running")
-
 except Exception as e:
     logger.critical(f"Fatal error: {str(e)}\n{traceback.format_exc()}")
-    # Still try to keep the container alive
+    # Just keep the container alive
     while True:
         logger.error("Application crashed but keeping container alive")
         time.sleep(300) 
