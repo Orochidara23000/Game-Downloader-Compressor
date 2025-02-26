@@ -17,14 +17,10 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # Convert Windows line endings to Unix for all shell scripts
-RUN find /app -type f -name "*.sh" -exec dos2unix {} \;
+RUN find /app -type f -name "*.sh" -exec dos2unix {} \; || echo "No shell scripts found or dos2unix failed"
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Make scripts executable 
-RUN chmod +x /app/start.sh /app/install_dependencies.sh
-
 
 # Explicitly install SteamCMD and 7zip
 RUN echo "Installing 7zip..." && \
@@ -42,10 +38,7 @@ RUN echo "Installing 7zip..." && \
     # Create directories and set permissions
     mkdir -p /app/logs /app/output /app/game && \
     chmod -R 755 /app/logs /app/output /app/game /app/steamcmd && \
-    chmod +x /app/start.sh
-
-# We'll run as root for now to eliminate permission issues
-# USER root
+    chmod +x /app/start.sh /app/install_dependencies.sh
 
 # Expose the application port
 EXPOSE 7860
@@ -54,14 +47,9 @@ EXPOSE 7860
 RUN if [ ! -e /usr/local/bin/7z ] && [ -e /usr/bin/7z ]; then ln -sf /usr/bin/7z /usr/local/bin/7z; fi && \
     if [ ! -e /usr/local/bin/steamcmd ] && [ -e /app/steamcmd/steamcmd.sh ]; then ln -sf /app/steamcmd/steamcmd.sh /usr/local/bin/steamcmd; fi
 
-# Use bash as entrypoint with enhanced debugging
-ENTRYPOINT ["/bin/bash", "-c"]
+# Set a healthcheck to restart if server is down
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:7860/ || exit 1
 
-# Debug and start application
-CMD ["echo 'PATH:' && echo $PATH && \
-     echo 'Installed packages:' && dpkg -l | grep p7zip && \
-     echo '7z exists:' && which 7z && \
-     echo 'SteamCMD exists:' && ls -la /app/steamcmd/steamcmd.sh && \
-     echo 'Starting app with additional debugging...' && \
-     export DEBUG=true && \
-     bash /app/start.sh"]
+# Use a simplified command that directly runs Python (avoiding start.sh issues)
+CMD ["python", "setup.py"]
