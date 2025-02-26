@@ -5,6 +5,7 @@ import time
 import logging
 import subprocess
 import traceback
+import threading
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +46,12 @@ def system_health_check():
         logger.error(error_msg)
         return error_msg
 
+def update_status():
+    """Function to manually update the status box"""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    health_status = system_health_check()
+    return f"Server running at {timestamp}\n\n{health_status}"
+
 # Create a very simple Gradio app
 logger.info("Initializing Gradio app")
 with gr.Blocks(title="Railway App") as demo:
@@ -57,14 +64,12 @@ with gr.Blocks(title="Railway App") as demo:
         interactive=False
     )
     
-    def keep_alive():
-        while True:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            health_status = system_health_check()
-            yield f"Server running at {timestamp}\n\n{health_status}"
-            time.sleep(30)
+    # Add a refresh button instead of automatic updates
+    refresh_btn = gr.Button("Refresh Status")
+    refresh_btn.click(fn=update_status, inputs=None, outputs=status_box)
     
-    demo.load(keep_alive, None, status_box, every=30)
+    # Update status initially
+    demo.load(update_status, None, [status_box])
     
     with gr.Row():
         with gr.Column():
@@ -83,22 +88,31 @@ with gr.Blocks(title="Railway App") as demo:
                 outputs=[greet_output]
             )
 
+# Function to keep the container alive in a separate thread
+def keep_alive_thread():
+    while True:
+        logger.info("Keep-alive thread running...")
+        time.sleep(60)
+
+# Start the keep-alive thread
+threading.Thread(target=keep_alive_thread, daemon=True).start()
+
 # Launch the app
 try:
     logger.info("Launching Gradio app...")
     port = int(os.getenv("PORT", 7860))
-    demo.queue(max_size=10)
+    
+    # Improved queue settings
+    demo.queue(concurrency_count=5)
     demo.launch(
         server_name="0.0.0.0",
         server_port=port,
         share=True,
         debug=True,
-        show_error=True,
-        prevent_thread_lock=True
+        show_error=True
     )
     
     # This code should never be reached in normal operation
-    # since demo.launch() should block indefinitely
     logger.warning("Gradio launch exited unexpectedly, entering backup loop")
     while True:
         time.sleep(60)
