@@ -160,13 +160,51 @@ def hash_credentials(username, password):
     combined = f"{username}:{password}"
     return hashlib.sha256(combined.encode()).hexdigest()[:8]
 
+def install_steamcmd():
+    """Install SteamCMD manually."""
+    logger.info("Starting manual SteamCMD installation")
+    
+    steamcmd_dir = os.path.join(os.getcwd(), "steamcmd")
+    os.makedirs(steamcmd_dir, exist_ok=True)
+    
+    try:
+        # Download SteamCMD
+        download_url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+        tar_path = os.path.join(steamcmd_dir, "steamcmd_linux.tar.gz")
+        
+        # Try wget first
+        try:
+            subprocess.run(["wget", "-O", tar_path, download_url], check=True)
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # If wget fails, try curl
+            try:
+                subprocess.run(["curl", "-o", tar_path, download_url], check=True)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                return "Error: Failed to download SteamCMD. Please install wget or curl."
+        
+        # Extract SteamCMD
+        subprocess.run(["tar", "-xzf", tar_path, "-C", steamcmd_dir], check=True)
+        os.remove(tar_path)
+        
+        # Make executable
+        steamcmd_path = os.path.join(steamcmd_dir, "steamcmd.sh")
+        os.chmod(steamcmd_path, 0o755)
+        
+        # Initial update
+        subprocess.run([steamcmd_path, "+quit"], check=True)
+        
+        return "SteamCMD installed successfully!"
+    except Exception as e:
+        logger.error(f"Failed to install SteamCMD: {str(e)}")
+        return f"Error installing SteamCMD: {str(e)}"
+
 def verify_steam_login(username, password, steam_guard_code="", anonymous=False):
     """Verify Steam login credentials."""
     logger.info(f"Verifying Steam login for {'anonymous' if anonymous else 'user'}")
     
     steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
     if not os.path.exists(steamcmd_path):
-        msg = "Error: SteamCMD not found. Please install dependencies first."
+        msg = "Error: SteamCMD not found. Please install it first."
         logger.error(msg)
         return msg
     
