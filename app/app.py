@@ -9,6 +9,7 @@ import threading
 import shutil
 import re
 import tempfile
+import glob
 
 # Configure logging
 logging.basicConfig(
@@ -175,188 +176,437 @@ force_install_dir {output_dir}
         f.write(script_content)
         return f.name
 
-def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guard="", platform="windows"):
-    """Run SteamCMD with authentication to download a game"""
+def run_steamcmd_with_auth(app_id, username, password, steam_guard, platform, auto_compress, clean_after_compress):
+    """Run SteamCMD with proper authentication and platform selection"""
+    global DOWNLOAD_STATE
+    
     try:
-        # Extract app ID if needed
-        clean_app_id = extract_app_id(app_id)
-        if not clean_app_id:
-            yield "⚠️ Invalid app ID. Please enter a numeric Steam app ID or Steam store URL."
-            return
-            
-        app_id = clean_app_id
-        logger.info(f"Starting download for App ID: {app_id} on platform: {platform}")
+        # Reset download state
+        DOWNLOAD_STATE = {
+            "app_id": None,
+            "username": username,
+            "platform": platform,
+            "in_progress": False,
+            "completed": False,
+            "last_progress": 0,
+            "auto_compress": auto_compress,
+            "clean_after_compress": clean_after_compress
+        }
         
-        # Check if anonymous login is being used
-        is_anonymous = username.lower() == "anonymous"
-        if is_anonymous:
-            yield f"ℹ️ Using anonymous login. Only free-to-play games can be downloaded this way.\n"
-        else:
-            yield f"ℹ️ Attempting to login as {username}. Please wait...\n"
+        # Extract app ID if provided as URL
+        app_id = extract_app_id(app_id)
+        
+        if not app_id:
+            return "Invalid App ID. Please provide a valid Steam App ID or URL.", "No active download"
             
-            # Redact password for security
-            if password:
-                logger.info(f"Using password (redacted) for user {username}")
+        DOWNLOAD_STATE["app_id"] = app_id
+            
+        # Validate input
+        if username != "anonymous" and not password:
+            return "Password is required for non-anonymous login.", "No active download"
+            
+        logger.info(f"Starting download for App ID: {app_id}")
+        
+        # Create output directories if they don't exist
+        os.makedirs("/app/game", exist_ok=True)
+        os.makedirs("/app/output", exist_ok=True)
+        
+        # Create a temporary script file for SteamCMD
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as script_file:
+            script_content = [
+                "@ShutdownOnFailedCommand 1",
+                "@NoPromptForPassword 1",
+                f"force_install_dir /app/game",
+                "login"
+            ]
+            
+            # Add authentication details
+            if username != "anonymous":
+                script_content.append(f"{username} {password}")
+                if steam_guard:
+                    script_content.append(steam_guard)
             else:
-                yield f"⚠️ No password provided for user {username}. Authentication may fail.\n"
+                script_content.append("anonymous")
+                
+            # Add platform override for Windows games
+            if platform == "windows":
+                script_content.append("@sSteamCmdForcePlatformType windows")
+            elif platform == "macos":
+                script_content.append("@sSteamCmdForcePlatformType macos")
+                
+            # Add the app download command with validation
+            script_content.append(f"app_update {app_id} validate")
+            script_content.append("quit")
+            
+            # Write the script content
+            script_file.write("\n".join(script_content).encode())
+            script_file_path = script_file.name
         
-        # Create output directory
-        output_dir = "/app/game"
-        os.makedirs(output_dir, exist_ok=True)
-            
-        # Create the script file
-        script_file = create_steam_script(username, password, app_id, output_dir, platform)
-        yield f"ℹ️ Created SteamCMD script with platform set to {platform}.\n"
-        
-        try:
-            # Execute SteamCMD with the script
-            cmd = ["/app/steamcmd/steamcmd.sh", "+runscript", script_file]
-            
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            
-            # Variables to track Steam Guard request
-            needs_steam_guard = False
-            
-            # Collect output
-            output_lines = []
-            for line in iter(process.stdout.readline, ''):
-                output_lines.append(line.strip())
-                if len(output_lines) > 100:  # Keep only last 100 lines
-                    output_lines.pop(0)
-                logger.info(f"STEAMCMD: {line.strip()}")
+        # Start download in a separate thread to not block the UI
+        def download_thread():
+            try:
+                DOWNLOAD_STATE["in_progress"] = True
+                DOWNLOAD_STATE["completed"] = False
+                DOWNLOAD_STATE["last_progress"] = 0
                 
-                # Check for Steam Guard request
-                if "Steam Guard code:" in line or "Two-factor code:" in line:
-                    needs_steam_guard = True
-                    if steam_guard:
-                        # Send the provided Steam Guard code
-                        process.stdin.write(f"{steam_guard}\n")
-                        process.stdin.flush()
-                        output_lines.append(f"Submitted Steam Guard code: {steam_guard}")
-                    else:
-                        output_lines.append("⚠️ Steam Guard code required but not provided!")
+                # Run SteamCMD with the script
+                process = subprocess.Popen(
+                    ["/app/steamcmd/steamcmd.sh", "+runscript", script_file_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
                 
-                # Check for platform error and provide helpful message
-                if "Invalid platform" in line:
-                    output_lines.append("⚠️ This game doesn't support the selected platform.")
-                    output_lines.append("Try changing the platform to 'windows' in the advanced settings.")
+                output_lines = []
+                for line in iter(process.stdout.readline, ''):
+                    if not line:
+                        break
+                        
+                    logger.info(f"STEAMCMD: {line.strip()}")
+                    output_lines.append(line.strip())
+                    
+                    # Extract progress information
+                    progress_match = re.search(r'progress: ([0-9.]+)', line)
+                    if progress_match:
+                        try:
+                            progress = float(progress_match.group(1))
+                            DOWNLOAD_STATE["last_progress"] = progress
+                        except:
+                            pass
+                            
+                # Wait for process to finish
+                process.wait()
                 
-                yield "\n".join(output_lines)
-            
-            # Get final exit code
-            process.stdout.close()
-            return_code = process.wait()
-            
-            # Check result
-            if return_code != 0:
-                if "Invalid platform" in "\n".join(output_lines):
-                    yield "\n\n⚠️ Download failed: Game not available for the selected platform."
-                    yield "Please try again with platform set to 'windows'."
+                # Clean up the script file
+                try:
+                    os.unlink(script_file_path)
+                except:
+                    pass
+                    
+                # Check if download completed successfully
+                if process.returncode == 0:
+                    DOWNLOAD_STATE["completed"] = True
+                    DOWNLOAD_STATE["in_progress"] = False
+                    output_lines.append("Download completed successfully!")
+                    
+                    # Auto-compress if enabled
+                    if DOWNLOAD_STATE["auto_compress"]:
+                        output_lines.append("Auto-compression enabled. Starting compression...")
+                        compress_result = compress_game_files(DOWNLOAD_STATE["clean_after_compress"])[0]
+                        output_lines.append("Compression result:")
+                        output_lines.append(compress_result)
                 else:
-                    yield f"\n\n⚠️ Download failed with exit code {return_code}"
-            else:
-                yield "\n\n✅ Download completed successfully!"
+                    DOWNLOAD_STATE["in_progress"] = False
+                    output_lines.append(f"Download failed with exit code {process.returncode}")
                 
-        finally:
-            # Clean up the temporary script file
-            if os.path.exists(script_file):
-                os.unlink(script_file)
-                
+                return "\n".join(output_lines)
+            except Exception as e:
+                DOWNLOAD_STATE["in_progress"] = False
+                error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                return error_msg
+        
+        # Start the download thread
+        threading.Thread(target=lambda: download_thread(), daemon=True).start()
+        
+        # Return initial message immediately
+        return f"Starting download for App ID: {app_id}\nDownload is running in the background. This log will update periodically.", "⏳ Download starting..."
+        
     except Exception as e:
-        error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
+        DOWNLOAD_STATE["in_progress"] = False
+        error_msg = f"Error starting download: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
-        yield error_msg
+        return error_msg, "Error during download"
 
-def compress_game_files():
-    """Compress downloaded game files using 7zip"""
+def resume_download(platform, auto_compress, clean_after_compress):
+    """Resume an interrupted download"""
+    global DOWNLOAD_STATE
+    
     try:
-        yield "Starting compression of game files..."
+        # Check if there's a download to resume
+        if not DOWNLOAD_STATE["app_id"]:
+            return "No download to resume. Please start a new download.", "No active download"
+            
+        # If download is already in progress, don't restart
+        if DOWNLOAD_STATE["in_progress"]:
+            return "Download is already in progress.", "⏳ Download in progress"
+            
+        app_id = DOWNLOAD_STATE["app_id"]
+        username = DOWNLOAD_STATE["username"]
+        
+        # Update state with new options
+        DOWNLOAD_STATE["platform"] = platform
+        DOWNLOAD_STATE["auto_compress"] = auto_compress
+        DOWNLOAD_STATE["clean_after_compress"] = clean_after_compress
+        
+        logger.info(f"Resuming download for App ID: {app_id}")
+        
+        # Create output directories if they don't exist
+        os.makedirs("/app/game", exist_ok=True)
+        os.makedirs("/app/output", exist_ok=True)
+        
+        # Create a temporary script file for SteamCMD
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as script_file:
+            script_content = [
+                "@ShutdownOnFailedCommand 1",
+                "@NoPromptForPassword 1",
+                f"force_install_dir /app/game",
+                "login"
+            ]
+            
+            # Add authentication details - for resume, just use anonymous or stored username
+            if username and username != "anonymous":
+                script_content.append(f"{username}")
+                # For resume we can't include password/guard code since it might timeout
+            else:
+                script_content.append("anonymous")
+                
+            # Add platform override
+            if platform == "windows":
+                script_content.append("@sSteamCmdForcePlatformType windows")
+            elif platform == "macos":
+                script_content.append("@sSteamCmdForcePlatformType macos")
+                
+            # Add the app download command with validation
+            script_content.append(f"app_update {app_id} validate")
+            script_content.append("quit")
+            
+            # Write the script content
+            script_file.write("\n".join(script_content).encode())
+            script_file_path = script_file.name
+        
+        # Start download in a separate thread
+        def resume_thread():
+            try:
+                DOWNLOAD_STATE["in_progress"] = True
+                DOWNLOAD_STATE["completed"] = False
+                
+                # Run SteamCMD with the script
+                process = subprocess.Popen(
+                    ["/app/steamcmd/steamcmd.sh", "+runscript", script_file_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                output_lines = []
+                for line in iter(process.stdout.readline, ''):
+                    if not line:
+                        break
+                        
+                    logger.info(f"STEAMCMD: {line.strip()}")
+                    output_lines.append(line.strip())
+                    
+                    # Extract progress information
+                    progress_match = re.search(r'progress: ([0-9.]+)', line)
+                    if progress_match:
+                        try:
+                            progress = float(progress_match.group(1))
+                            DOWNLOAD_STATE["last_progress"] = progress
+                        except:
+                            pass
+                
+                # Wait for process to finish
+                process.wait()
+                
+                # Clean up the script file
+                try:
+                    os.unlink(script_file_path)
+                except:
+                    pass
+                    
+                # Check if download completed successfully
+                if process.returncode == 0:
+                    DOWNLOAD_STATE["completed"] = True
+                    DOWNLOAD_STATE["in_progress"] = False
+                    output_lines.append("Download completed successfully!")
+                    
+                    # Auto-compress if enabled
+                    if DOWNLOAD_STATE["auto_compress"]:
+                        output_lines.append("Auto-compression enabled. Starting compression...")
+                        compress_result = compress_game_files(DOWNLOAD_STATE["clean_after_compress"])[0]
+                        output_lines.append("Compression result:")
+                        output_lines.append(compress_result)
+                else:
+                    DOWNLOAD_STATE["in_progress"] = False
+                    output_lines.append(f"Download failed with exit code {process.returncode}")
+                
+                return "\n".join(output_lines)
+            except Exception as e:
+                DOWNLOAD_STATE["in_progress"] = False
+                error_msg = f"Error during resume: {str(e)}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                return error_msg
+        
+        # Start the resume thread
+        threading.Thread(target=lambda: resume_thread(), daemon=True).start()
+        
+        # Return initial message immediately
+        return f"Resuming download for App ID: {app_id}\nDownload is running in the background. This log will update periodically.", "⏳ Resuming download..."
+        
+    except Exception as e:
+        DOWNLOAD_STATE["in_progress"] = False
+        error_msg = f"Error resuming download: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return error_msg, "Error during resume"
+
+def cancel_download():
+    """Cancel an active download"""
+    global DOWNLOAD_STATE
+    
+    try:
+        # Check if there's a download to cancel
+        if not DOWNLOAD_STATE["in_progress"]:
+            return "No active download to cancel.", "No active download"
+            
+        # Find and kill SteamCMD processes
+        try:
+            subprocess.run(["pkill", "-f", "steamcmd"], check=False)
+        except:
+            pass
+            
+        # Update state
+        DOWNLOAD_STATE["in_progress"] = False
+        
+        return "Download cancelled. You can resume it later with the Resume button.", "⚠️ Download cancelled"
+    except Exception as e:
+        error_msg = f"Error cancelling download: {str(e)}"
+        logger.error(error_msg)
+        return error_msg, "Error during cancellation"
+
+def compress_game_files(clean_after_compress=False):
+    """Compress game files with 7zip maximum compression"""
+    try:
+        game_dir = "/app/game"
+        output_dir = "/app/output"
         
         # Check if game directory exists and has files
-        game_dir = "/app/game"
         if not os.path.exists(game_dir):
-            yield "Error: Game directory doesn't exist. Download a game first."
-            return
+            return "No game files found to compress.", "No files to compress"
             
-        # Check if there are files to compress
-        file_count = sum(len(files) for _, _, files in os.walk(game_dir))
-        if file_count == 0:
-            yield "No files found to compress. Download a game first."
-            return
+        # Find the app ID from the manifest
+        app_id = DOWNLOAD_STATE.get("app_id", "unknown")
+        manifest_files = glob.glob(f"{game_dir}/appmanifest_*.acf")
+        if manifest_files:
+            try:
+                manifest_file = manifest_files[0]
+                with open(manifest_file, 'r') as f:
+                    content = f.read()
+                    app_id_match = re.search(r'"appid"\s+"(\d+)"', content)
+                    name_match = re.search(r'"name"\s+"([^"]+)"', content)
+                    
+                    if app_id_match:
+                        app_id = app_id_match.group(1)
+                    
+                    if name_match:
+                        game_name = name_match.group(1)
+                        # Sanitize game name for filenames
+                        game_name = re.sub(r'[^\w\-\.]', '_', game_name)
+                    else:
+                        game_name = f"game_{app_id}"
+            except:
+                game_name = f"game_{app_id}"
+        else:
+            game_name = f"game_{app_id}"
             
-        # Create output directory
-        output_dir = "/app/output"
+        # Create timestamp for the filename
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        output_file = f"{output_dir}/{game_name}_{timestamp}.7z"
+        
+        # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
         
-        # Get app ID or name from directory if possible
-        app_id = "game"
-        steamapps_path = os.path.join(game_dir, "steamapps", "appmanifest_*.acf")
-        import glob
-        manifest_files = glob.glob(steamapps_path)
-        if manifest_files:
-            # Extract app ID from manifest filename
-            manifest_file = os.path.basename(manifest_files[0])
-            app_id_match = re.search(r'appmanifest_(\d+).acf', manifest_file)
-            if app_id_match:
-                app_id = app_id_match.group(1)
+        # Start compression
+        logger.info(f"Starting compression of game files to {output_file}")
         
-        # Create timestamp
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        output_file = os.path.join(output_dir, f"steam_game_{app_id}_{timestamp}.7z")
+        def compress_thread():
+            try:
+                # Create 7zip command with maximum compression
+                process = subprocess.Popen(
+                    ["7z", "a", "-mx=9", output_file, f"{game_dir}/*"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                output_lines = []
+                for line in iter(process.stdout.readline, ''):
+                    if not line:
+                        break
+                        
+                    logger.info(f"7ZIP: {line.strip()}")
+                    output_lines.append(line.strip())
+                
+                # Wait for process to finish
+                process.wait()
+                
+                if process.returncode == 0:
+                    output_lines.append(f"Compression completed successfully: {output_file}")
+                    
+                    # Clean up original files if requested
+                    if clean_after_compress:
+                        output_lines.append("Cleaning up original files...")
+                        clean_result = clean_game_files()[0]
+                        output_lines.append(clean_result)
+                        
+                    return "\n".join(output_lines)
+                else:
+                    return f"Compression failed with exit code {process.returncode}\n" + "\n".join(output_lines)
+            except Exception as e:
+                error_msg = f"Error during compression: {str(e)}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                return error_msg
         
-        yield f"Compressing game files from {game_dir}\nOutput file: {output_file}\nThis may take some time..."
+        # Start compression thread
+        thread = threading.Thread(target=lambda: compress_thread(), daemon=True)
+        thread.start()
         
-        # Run 7zip to compress the files
-        cmd = [
-            "7z", "a",          # Add to archive
-            "-t7z",             # 7z format
-            "-m0=lzma2",        # LZMA2 method
-            "-mx=9",            # Ultra compression
-            "-aoa",             # Overwrite all existing files
-            output_file,        # Output file
-            f"{game_dir}/*"     # Input files
-        ]
-        
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        
-        # Show progress
-        progress_output = []
-        for line in iter(process.stdout.readline, ''):
-            progress_output.append(line.strip())
-            if len(progress_output) > 20:  # Keep only last 20 lines
-                progress_output.pop(0)
-            yield "\n".join(progress_output)
-        
-        # Get result
-        process.stdout.close()
-        return_code = process.wait()
-        
-        if return_code != 0:
-            yield f"Error: Compression failed with code {return_code}"
-            return
-            
-        # Report success
-        size_bytes = os.path.getsize(output_file)
-        size_mb = size_bytes / (1024 * 1024)
-            
-        yield f"Compression completed successfully!\nOutput file: {output_file}\nSize: {size_mb:.2f} MB"
-    
+        return f"Starting compression of game files to {output_file}\nCompression is running in the background. This may take a while...", "Compressing game files..."
     except Exception as e:
-        error_msg = f"Error during compression: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Error setting up compression: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
-        yield error_msg
+        return error_msg, "Error during compression setup"
+
+def clean_game_files():
+    """Clean up original game files after compression"""
+    try:
+        game_dir = "/app/game"
+        
+        # Check if game directory exists
+        if not os.path.exists(game_dir):
+            return "No game files found to clean.", "No files to clean"
+            
+        # Get size before cleaning
+        size_before = 0
+        for root, dirs, files in os.walk(game_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                size_before += os.path.getsize(file_path)
+                
+        # Remove all files and subdirectories
+        for item in os.listdir(game_dir):
+            item_path = os.path.join(game_dir, item)
+            if os.path.isfile(item_path):
+                os.unlink(item_path)
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+                
+        # Reset download state
+        global DOWNLOAD_STATE
+        DOWNLOAD_STATE["completed"] = False
+        DOWNLOAD_STATE["in_progress"] = False
+        
+        return f"Successfully cleaned {size_before/1024**3:.2f} GB of game files.", "Game files cleaned"
+    except Exception as e:
+        error_msg = f"Error cleaning game files: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return error_msg, "Error during cleanup"
 
 def list_downloaded_files():
     """List files in the download directory"""
@@ -492,52 +742,143 @@ try:
                     )
                 
                 with gr.Accordion("Advanced Settings", open=False):
-                    platform = gr.Dropdown(
-                        label="Platform",
-                        choices=["windows", "linux", "macos"],
-                        value="windows",
-                        info="Most games require Windows platform"
-                    )
+                    with gr.Row():
+                        platform = gr.Dropdown(
+                            label="Platform",
+                            choices=["windows", "linux", "macos"],
+                            value="windows",
+                            info="Most games require Windows platform"
+                        )
+                        auto_compress = gr.Checkbox(
+                            label="Auto-compress after download",
+                            value=True,
+                            info="Automatically compress game after download completes"
+                        )
+                        clean_after_compress = gr.Checkbox(
+                            label="Clean after compression",
+                            value=True,
+                            info="Delete original files after successful compression"
+                        )
             
-            download_btn = gr.Button("Download Game")
+            with gr.Row():
+                download_btn = gr.Button("⬇️ Download Game")
+                resume_btn = gr.Button("▶️ Resume Download")
+                cancel_btn = gr.Button("⏹️ Cancel Download")
+            
             download_output = gr.Textbox(label="Download Progress", lines=15)
             
             download_btn.click(
                 fn=run_steamcmd_with_auth,
-                inputs=[app_id, username, password, steam_guard, platform],
-                outputs=download_output
+                inputs=[app_id, username, password, steam_guard, platform, auto_compress, clean_after_compress],
+                outputs=[download_output, download_status]
+            )
+            
+            resume_btn.click(
+                fn=resume_download,
+                inputs=[platform, auto_compress, clean_after_compress],
+                outputs=[download_output, download_status]
+            )
+            
+            cancel_btn.click(
+                fn=cancel_download,
+                inputs=None,
+                outputs=[download_output, download_status]
             )
         
         with gr.Tab("Compress Files"):
             gr.Markdown("""
-            ## Compress Downloaded Game Files
+            ## 📦 Compress Downloaded Game Files
             
             Use this tab to compress downloaded game files using 7zip with maximum compression.
             The compressed file will be stored in the /app/output directory.
+            
+            After successful compression, you can optionally clean up the original files to save space.
             """)
             
-            compress_btn = gr.Button("Compress Game Files")
+            with gr.Row():
+                compress_btn = gr.Button("🗜️ Compress Game Files")
+                clean_btn = gr.Button("🧹 Clean Original Files")
+            
             compress_output = gr.Textbox(label="Compression Progress", lines=15)
             
             compress_btn.click(
                 fn=compress_game_files,
+                inputs=[clean_after_compress],
+                outputs=[compress_output, download_status]
+            )
+            
+            clean_btn.click(
+                fn=clean_game_files,
                 inputs=None,
-                outputs=compress_output
+                outputs=[compress_output, download_status]
             )
         
         with gr.Tab("File Browser"):
+            gr.Markdown("""
+            ## 🔍 File Browser
+            
+            Use this tab to browse downloaded game files and compressed archives.
+            You can monitor disk usage and see what files are currently on the system.
+            """)
+            
             with gr.Row():
                 with gr.Column():
                     gr.Markdown("### Downloaded Game Files")
                     game_files_output = gr.Textbox(label="Game Files", lines=20)
-                    list_game_btn = gr.Button("List Downloaded Game Files")
+                    list_game_btn = gr.Button("📂 List Downloaded Game Files")
                     list_game_btn.click(fn=list_downloaded_files, inputs=None, outputs=game_files_output)
                 
                 with gr.Column():
                     gr.Markdown("### Compressed Output Files")
                     compressed_files_output = gr.Textbox(label="Compressed Files", lines=20)
-                    list_compressed_btn = gr.Button("List Compressed Files")
+                    list_compressed_btn = gr.Button("📂 List Compressed Files")
                     list_compressed_btn.click(fn=list_compressed_files, inputs=None, outputs=compressed_files_output)
+        
+        with gr.Tab("Download Files"):
+            gr.Markdown("""
+            ## 💾 Download Compressed Files
+            
+            Select and download the compressed game files you've created.
+            Files are listed in order of creation with the newest first.
+            """)
+            
+            file_list = get_compressed_file_list()
+            
+            if file_list:
+                file_dropdown = gr.Dropdown(
+                    label="Select File to Download",
+                    choices=file_list,
+                    value=file_list[0] if file_list else None
+                )
+                
+                refresh_files_btn = gr.Button("🔄 Refresh File List")
+                download_file_btn = gr.Button("💾 Download Selected File")
+                
+                file_info = gr.Markdown(get_download_links())
+                
+                file_output = gr.File(label="Download File")
+                
+                # Functions for the download tab
+                refresh_files_btn.click(
+                    fn=lambda: gr.Dropdown(choices=get_compressed_file_list()),
+                    inputs=None,
+                    outputs=file_dropdown
+                )
+                
+                refresh_files_btn.click(
+                    fn=get_download_links,
+                    inputs=None,
+                    outputs=file_info
+                )
+                
+                download_file_btn.click(
+                    fn=get_file_for_download,
+                    inputs=file_dropdown,
+                    outputs=file_output
+                )
+            else:
+                gr.Markdown("### No compressed files available yet")
+                gr.Markdown("Use the Download Game tab to download a game, then compress it in the Compress Files tab.")
     
     # Launch the demo
     logger.info("Launching Gradio app...")
