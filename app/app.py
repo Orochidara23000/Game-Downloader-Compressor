@@ -128,105 +128,136 @@ def extract_app_id(input_text):
     
     return None
 
-def run_steamcmd_with_auth(app_id, username, password, steam_guard, platform):
-    """Run SteamCMD with proper authentication and platform selection"""
+def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guard="", platform="windows"):
+    """Run SteamCMD with authentication to download a game"""
     try:
-        # Extract app ID if provided as URL
-        app_id = extract_app_id(app_id)
-        
-        if not app_id:
-            return "Invalid App ID. Please provide a valid Steam App ID or URL."
+        # Extract app ID if needed
+        clean_app_id = extract_app_id(app_id)
+        if not clean_app_id:
+            yield "⚠️ Invalid app ID. Please enter a numeric Steam app ID or Steam store URL."
+            return
             
-        # Validate input
-        if username != "anonymous" and not password:
-            return "Password is required for non-anonymous login."
-            
-        logger.info(f"Starting download for App ID: {app_id}")
+        app_id = clean_app_id
+        logger.info(f"Starting download for App ID: {app_id} on platform: {platform}")
         
-        # Create output directories if they don't exist
-        os.makedirs("/app/game", exist_ok=True)
-        os.makedirs("/app/output", exist_ok=True)
-        
-        # Create a temporary script file for SteamCMD
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as script_file:
-            script_content = [
-                "@ShutdownOnFailedCommand 1",
-                "@NoPromptForPassword 1",
-                f"force_install_dir /app/game",
-                "login"
-            ]
+        # Check if anonymous login is being used
+        is_anonymous = username.lower() == "anonymous"
+        if is_anonymous:
+            logger.info("Using anonymous login")
+            yield f"ℹ️ Using anonymous login. Only free-to-play games can be downloaded this way.\n"
+        else:
+            logger.info(f"Attempting to login as {username}")
+            yield f"ℹ️ Attempting to login as {username}. Please wait...\n"
             
-            # Add authentication details
-            if username != "anonymous":
-                script_content.append(f"{username} {password}")
-                if steam_guard:
-                    script_content.append(steam_guard)
+            # Redact password for security
+            if password:
+                logger.info(f"Using password (redacted) for user {username}")
             else:
-                script_content.append("anonymous")
-                
-            # Add platform override for Windows games
-            if platform == "windows":
-                script_content.append("@sSteamCmdForcePlatformType windows")
-            elif platform == "macos":
-                script_content.append("@sSteamCmdForcePlatformType macos")
-                
-            # Add the app download command with validation
-            script_content.append(f"app_update {app_id} validate")
-            script_content.append("quit")
+                logger.info("No password provided for user")
+                yield f"⚠️ No password provided for user {username}. Authentication may fail.\n"
+        
+        # Create output directory
+        output_dir = "/app/game"
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Download directory: {output_dir}")
             
-            # Write the script content
-            script_file.write("\n".join(script_content).encode())
-            script_file_path = script_file.name
+        # Create the script file
+        script_file = create_steam_script(username, password, app_id, output_dir, platform)
+        logger.info(f"Created SteamCMD script file: {script_file}")
+        yield f"ℹ️ Created SteamCMD script with platform set to {platform}.\n"
         
-        # Start download in a separate thread to not block the UI
-        def download_thread():
-            try:
-                # Run SteamCMD with the script
-                process = subprocess.Popen(
-                    ["/app/steamcmd/steamcmd.sh", "+runscript", script_file_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+        # Log the command being executed (without credentials)
+        logger.info(f"Executing SteamCMD with script to download App ID: {app_id}")
+        
+        try:
+            # Execute SteamCMD with the script
+            cmd = ["/app/steamcmd/steamcmd.sh", "+runscript", script_file]
+            
+            # Add periodic status updates
+            download_start_time = time.time()
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            
+            # Variables to track Steam Guard request
+            needs_steam_guard = False
+            
+            # Collect output
+            output_lines = []
+            line_count = 0
+            for line in iter(process.stdout.readline, ''):
+                line_count += 1
+                output_lines.append(line.strip())
+                if len(output_lines) > 100:  # Keep only last 100 lines
+                    output_lines.pop(0)
                 
-                output_lines = []
-                for line in iter(process.stdout.readline, ''):
-                    if not line:
-                        break
-                        
-                    logger.info(f"STEAMCMD: {line.strip()}")
-                    output_lines.append(line.strip())
+                # Log every 20th line to avoid flooding logs
+                if line_count % 20 == 0:
+                    elapsed_time = time.time() - download_start_time
+                    logger.info(f"Download in progress for {elapsed_time:.1f} seconds. Last output: {line.strip()}")
                 
-                # Wait for process to finish
-                process.wait()
+                # Check for Steam Guard request
+                if "Steam Guard code:" in line or "Two-factor code:" in line:
+                    needs_steam_guard = True
+                    logger.info("Steam Guard code requested")
+                    if steam_guard:
+                        # Send the provided Steam Guard code
+                        process.stdin.write(f"{steam_guard}\n")
+                        process.stdin.flush()
+                        logger.info("Submitted Steam Guard code")
+                        output_lines.append(f"Submitted Steam Guard code: {steam_guard}")
+                    else:
+                        logger.warning("Steam Guard code required but not provided")
+                        output_lines.append("⚠️ Steam Guard code required but not provided!")
                 
-                # Clean up the script file
-                try:
-                    os.unlink(script_file_path)
-                except:
-                    pass
+                # Check for platform error and provide helpful message
+                if "Invalid platform" in line:
+                    logger.error(f"Invalid platform detected: {platform}")
+                    output_lines.append("⚠️ This game doesn't support the selected platform.")
+                    output_lines.append("Try changing the platform to 'windows' in the advanced settings.")
                 
-                if process.returncode == 0:
-                    output_lines.append(f"Download completed successfully!")
-                    return "\n".join(output_lines)
+                # Log progress indicators
+                if "Update state" in line or "%" in line:
+                    logger.info(f"Download progress update: {line.strip()}")
+                
+                yield "\n".join(output_lines)
+            
+            # Get final exit code
+            process.stdout.close()
+            return_code = process.wait()
+            
+            # Log completion
+            download_duration = time.time() - download_start_time
+            logger.info(f"Download process completed with code {return_code} after {download_duration:.1f} seconds")
+            
+            # Check result
+            if return_code != 0:
+                if "Invalid platform" in "\n".join(output_lines):
+                    logger.error(f"Download failed: Game not available for platform: {platform}")
+                    yield "\n\n⚠️ Download failed: Game not available for the selected platform."
+                    yield "Please try again with platform set to 'windows'."
                 else:
-                    return f"Download failed with exit code {process.returncode}\n" + "\n".join(output_lines)
-            except Exception as e:
-                error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
-                logger.error(error_msg)
-                return error_msg
-        
-        # Start download thread
-        thread = threading.Thread(target=lambda: download_thread(), daemon=True)
-        thread.start()
-        
-        return f"Starting download for App ID: {app_id}\nDownload is running in the background. This may take a while..."
+                    logger.error(f"Download failed with exit code {return_code}")
+                    yield f"\n\n⚠️ Download failed with exit code {return_code}"
+            else:
+                logger.info(f"Download successful for App ID: {app_id}")
+                yield "\n\n✅ Download completed successfully!"
+                
+        finally:
+            # Clean up the temporary script file
+            if os.path.exists(script_file):
+                os.unlink(script_file)
+                logger.info(f"Cleaned up script file: {script_file}")
+                
     except Exception as e:
-        error_msg = f"Error setting up download: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
-        return error_msg
+        yield error_msg
 
 def list_downloaded_files():
     """List downloaded game files"""
