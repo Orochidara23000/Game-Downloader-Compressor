@@ -128,6 +128,33 @@ def extract_app_id(input_text):
     
     return None
 
+def create_steam_script(username, password, app_id, output_dir, platform="windows"):
+    """Create a SteamCMD script file to handle login and download"""
+    script_content = f"""@ShutdownOnFailedCommand 1
+@NoPromptForPassword 1
+force_install_dir {output_dir}
+"""
+    
+    # Handle login based on whether it's anonymous or not
+    if username.lower() == "anonymous":
+        script_content += "login anonymous\n"
+    else:
+        # Use a secure way to pass credentials - don't include password in script
+        script_content += f"login {username}\n"
+    
+    # Set platform override if needed
+    if platform.lower() != "linux":
+        script_content += f"@sSteamCmdForcePlatformType {platform}\n"
+    
+    # Add the app update command
+    script_content += f"app_update {app_id} validate\n"
+    script_content += "quit\n"
+    
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.txt', mode='w') as f:
+        f.write(script_content)
+        return f.name
+
 def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guard="", platform="windows"):
     """Run SteamCMD with authentication to download a game"""
     try:
