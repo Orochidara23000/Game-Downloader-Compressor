@@ -48,6 +48,20 @@ FREE_GAMES = [
     {"name": "War Thunder", "app_id": "236390", "platform": "windows/linux/macos"}
 ]
 
+# Extract app ID from URL or directly use the App ID
+def extract_app_id(input_text):
+    """Extract app ID from URL or direct input"""
+    # Check if input is directly an app ID
+    if input_text.isdigit():
+        return input_text
+    
+    # Try to extract app ID from URL
+    app_id_match = re.search(r'app/(\d+)', input_text)
+    if app_id_match:
+        return app_id_match.group(1)
+    
+    return None
+
 # Function to check download progress for the UI
 def get_download_progress():
     """Get current download progress for UI updates"""
@@ -68,6 +82,10 @@ def get_download_progress():
     
     # No download
     return "No active download"
+
+def update_status(dummy=None):
+    """Update function for refreshing status"""
+    return get_download_progress()
 
 def install_steamcmd():
     """Install SteamCMD properly with all required dependencies"""
@@ -197,27 +215,6 @@ def system_health_check():
         error_msg = f"Error during health check: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
         return error_msg
-
-def extract_app_id(input_string):
-    """Extract app ID from various input formats"""
-    try:
-        # If it's already a valid app ID (numeric)
-        if re.match(r'^\d+$', input_string):
-            return input_string
-            
-        # Check if it's a steam URL
-        url_match = re.search(r'store\.steampowered\.com/app/(\d+)', input_string)
-        if url_match:
-            return url_match.group(1)
-            
-        # Check if it's just digits with some whitespace
-        digits_only = re.sub(r'\D', '', input_string)
-        if digits_only:
-            return digits_only
-            
-        return None
-    except:
-        return None
 
 def run_steamcmd_with_auth(app_id, username, password, steam_guard, platform, auto_compress, clean_after_compress):
     """Run SteamCMD with proper authentication and platform selection"""
@@ -826,8 +823,9 @@ try:
             interactive=False
         )
         
-        # Download status auto-refresh
-        download_status.change(fn=get_download_progress, inputs=None, outputs=download_status, every=5)
+        # Add manual refresh button for status instead of auto-refresh
+        refresh_status_btn = gr.Button("🔄 Refresh Download Status", visible=True)
+        refresh_status_btn.click(fn=update_status, inputs=None, outputs=download_status)
         
         with gr.Tab("System Status"):
             status_output = gr.Textbox(
