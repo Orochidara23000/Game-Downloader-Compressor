@@ -20,14 +20,14 @@ echo "Created required directories with proper permissions."
 
 # Check if 7z is installed
 if command -v 7z &> /dev/null; then
-    echo "7zip is already installed."
+    echo "7zip is already installed at $(which 7z)."
 else
     echo "Installing 7zip..."
     apt-get update && apt-get install -y p7zip-full
     
     # Verify installation
     if command -v 7z &> /dev/null; then
-        echo "7zip installed successfully."
+        echo "7zip installed successfully at $(which 7z)."
     else
         echo "ERROR: 7zip installation failed!"
         exit 1
@@ -37,7 +37,7 @@ fi
 # Check for steamcmd directory
 STEAMCMD_DIR="${APP_DIR}/steamcmd"
 if [ -d "$STEAMCMD_DIR" ] && [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
-    echo "SteamCMD is already installed."
+    echo "SteamCMD is already installed at ${STEAMCMD_DIR}/steamcmd.sh."
     
     # Verify executable permissions
     if [ -x "${STEAMCMD_DIR}/steamcmd.sh" ]; then
@@ -47,7 +47,7 @@ if [ -d "$STEAMCMD_DIR" ] && [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
         chmod +x "${STEAMCMD_DIR}/steamcmd.sh"
     fi
 else
-    echo "Installing SteamCMD..."
+    echo "Installing SteamCMD to ${STEAMCMD_DIR}..."
     mkdir -p "$STEAMCMD_DIR"
     cd "$STEAMCMD_DIR"
     
@@ -84,17 +84,31 @@ else
     cd "$APP_DIR"
 fi
 
+# Create symlinks in standard paths
+echo "Creating symlinks..."
+if [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
+    # Create symlink for SteamCMD if needed
+    if [ ! -e "/usr/local/bin/steamcmd" ]; then
+        ln -sf "${STEAMCMD_DIR}/steamcmd.sh" "/usr/local/bin/steamcmd" || echo "Warning: Failed to create steamcmd symlink, but continuing anyway."
+        echo "Created symlink for steamcmd in /usr/local/bin/"
+    fi
+fi
+
 # Verify all installations and permissions as a final check
 echo "Performing final verification checks..."
 
 if ! command -v 7z &> /dev/null; then
     echo "ERROR: 7zip installation verification failed!"
     exit 1
+else
+    echo "7zip verified at $(which 7z)"
 fi
 
 if [ ! -x "${STEAMCMD_DIR}/steamcmd.sh" ]; then
     echo "ERROR: SteamCMD verification failed!"
     exit 1
+else
+    echo "SteamCMD verified at ${STEAMCMD_DIR}/steamcmd.sh"
 fi
 
 # Test write permissions to required directories
@@ -104,6 +118,7 @@ for dir in "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"; do
         exit 1
     else
         rm "${dir}/.write_test"
+        echo "Write permissions verified for ${dir}"
     fi
 done
 
