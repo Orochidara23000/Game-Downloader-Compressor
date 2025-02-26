@@ -3,7 +3,7 @@ import gradio as gr
 import threading
 from common import (
     system_check, verify_disk_space, verify_steam_login,
-    download_and_compress_from_url, add_to_queue, get_queue_status, get_downloaded_files
+    add_to_queue, get_queue_status, get_downloaded_files
 )
 
 # Ensure the default output directory exists
