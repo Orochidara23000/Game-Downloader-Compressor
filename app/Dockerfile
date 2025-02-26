@@ -3,48 +3,57 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY . /app
 
-# Install system dependencies - 7zip
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-      lib32stdc++6 \
-      wget \
-      unzip \
-      tar \
-      ca-certificates \
-      p7zip-full \
-      findutils && \
-    apt-get clean && \
-    # Verify 7zip installation
-    which 7z && \
-    7z --help
+    lib32stdc++6 \
+    wget \
+    unzip \
+    tar \
+    ca-certificates \
+    p7zip-full \
+    findutils \
+    procps \
+    && apt-get clean
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create steamcmd directory and install SteamCMD in the correct location
-RUN mkdir -p /app/steamcmd && \
+# Explicitly install SteamCMD and 7zip
+RUN echo "Installing 7zip..." && \
+    apt-get update && apt-get install -y p7zip-full && \
+    echo "7zip installed at:" && which 7z && \
+    echo "Installing SteamCMD..." && \
+    mkdir -p /app/steamcmd && \
     cd /app/steamcmd && \
     wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && \
     tar -xzf steamcmd_linux.tar.gz && \
     rm steamcmd_linux.tar.gz && \
     chmod +x steamcmd.sh && \
-    # Verify steamcmd installation
+    echo "SteamCMD installed at:" && \
     ls -la /app/steamcmd/steamcmd.sh && \
-    cd /app && \
-    # Create other required directories
+    # Create directories and set permissions
     mkdir -p /app/logs /app/output /app/game && \
     chmod -R 755 /app/logs /app/output /app/game /app/steamcmd && \
-    # Make start.sh executable
     chmod +x /app/start.sh
 
-# Create non-root user
-RUN useradd -m appuser && \
-    chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
+# We'll run as root for now to eliminate permission issues
+# USER root
 
 # Expose the application port
 EXPOSE 7860
 
-# Debug the environment before starting
-CMD ["bash", "-c", "echo 'Content of app directory:' && ls -la /app && echo 'SteamCMD exists:' && test -f /app/steamcmd/steamcmd.sh && echo 'Yes' || echo 'No' && echo '7z location:' && which 7z || echo '7z not found' && echo 'Starting app...' && /app/start.sh"]
+# Create helpful symlinks to ensure tools are in expected locations
+RUN ln -sf /usr/bin/7z /bin/7z && \
+    ln -sf /app/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+
+# Use bash as entrypoint with enhanced debugging
+ENTRYPOINT ["/bin/bash", "-c"]
+
+# Debug and start application
+CMD ["echo 'PATH:' && echo $PATH && \
+     echo 'Installed packages:' && dpkg -l | grep p7zip && \
+     echo '7z exists:' && which 7z && \
+     echo 'SteamCMD exists:' && ls -la /app/steamcmd/steamcmd.sh && \
+     echo 'Starting app with additional debugging...' && \
+     export DEBUG=true && \
+     bash /app/start.sh"]
