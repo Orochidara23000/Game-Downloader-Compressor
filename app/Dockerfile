@@ -43,8 +43,8 @@ RUN echo "Installing 7zip..." && \
 EXPOSE 7860
 
 # Create helpful symlinks to ensure tools are in expected locations
-RUN ln -sf /usr/bin/7z /bin/7z && \
-    ln -sf /app/steamcmd/steamcmd.sh /usr/local/bin/steamcmd
+RUN if [ ! -e /usr/local/bin/7z ] && [ -e /usr/bin/7z ]; then ln -sf /usr/bin/7z /usr/local/bin/7z; fi && \
+    if [ ! -e /usr/local/bin/steamcmd ] && [ -e /app/steamcmd/steamcmd.sh ]; then ln -sf /app/steamcmd/steamcmd.sh /usr/local/bin/steamcmd; fi
 
 # Use bash as entrypoint with enhanced debugging
 ENTRYPOINT ["/bin/bash", "-c"]
