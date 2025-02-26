@@ -5,7 +5,7 @@ import time
 import logging
 import subprocess
 import traceback
-from common import verify_steam_login, download_game, logger, install_steamcmd
+from common import verify_steam_login, download_game, logger, install_steamcmd, system_check
 
 # Configure logging
 logging.basicConfig(
@@ -90,16 +90,25 @@ with gr.Blocks(title="Steam Game Downloader") as demo:
     gr.Markdown("Download Steam game files for later compression in Google Colab")
     
     with gr.Row():
+        system_status = gr.Textbox(label="System Status", value="Click 'Check System' to verify setup", lines=5)
+        check_system_btn = gr.Button("Check System")
+        check_system_btn.click(fn=system_check, inputs=[], outputs=system_status)
+    
+    with gr.Row():
         steamcmd_status = gr.Textbox(label="SteamCMD Status", value=check_steamcmd())
         install_btn = gr.Button("Install SteamCMD")
         
         def install_and_update_status():
             result = install_steamcmd()
-            return result, check_steamcmd()
+            return result, check_steamcmd(), system_check()
         
         install_btn.click(
             fn=install_and_update_status,
-            outputs=[gr.Textbox(label="Installation Result"), steamcmd_status]
+            outputs=[
+                gr.Textbox(label="Installation Result"),
+                steamcmd_status,
+                system_status
+            ]
         )
     
     with gr.Row():
@@ -145,7 +154,7 @@ with gr.Blocks(title="Steam Game Downloader") as demo:
 
 # Launch the app
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 7860))
+    port = int(os.getenv("PORT", 8080))
     demo.launch(
         server_name="0.0.0.0",
         server_port=port,
