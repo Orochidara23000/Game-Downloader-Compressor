@@ -5,7 +5,7 @@ import time
 import logging
 import subprocess
 import traceback
-from common import verify_steam_login, download_game, logger
+from common import verify_steam_login, download_game, logger, install_steamcmd
 
 # Configure logging
 logging.basicConfig(
@@ -77,10 +77,30 @@ def download_handler(steam_url, username, password, steam_guard_code, use_anonym
     else:
         return f"Download failed: {message}"
 
+def check_steamcmd():
+    """Check if SteamCMD is installed and return status."""
+    steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
+    if os.path.exists(steamcmd_path) and os.access(steamcmd_path, os.X_OK):
+        return "✅ SteamCMD is installed and executable"
+    return "❌ SteamCMD is not installed"
+
 # Create Gradio interface
 with gr.Blocks(title="Steam Game Downloader") as demo:
     gr.Markdown("# Steam Game Downloader")
     gr.Markdown("Download Steam game files for later compression in Google Colab")
+    
+    with gr.Row():
+        steamcmd_status = gr.Textbox(label="SteamCMD Status", value=check_steamcmd())
+        install_btn = gr.Button("Install SteamCMD")
+        
+        def install_and_update_status():
+            result = install_steamcmd()
+            return result, check_steamcmd()
+        
+        install_btn.click(
+            fn=install_and_update_status,
+            outputs=[gr.Textbox(label="Installation Result"), steamcmd_status]
+        )
     
     with gr.Row():
         steam_url = gr.Textbox(
@@ -105,8 +125,17 @@ with gr.Blocks(title="Steam Game Downloader") as demo:
     
     use_anonymous.change(toggle_login_fields, use_anonymous, [username, password, steam_guard])
     
-    download_btn = gr.Button("Start Download")
+    download_btn = gr.Button("Start Download", interactive=False)
     status_output = gr.Textbox(label="Status", lines=5)
+    
+    def update_download_button(steamcmd_status_text):
+        return gr.update(interactive="✅" in steamcmd_status_text)
+    
+    steamcmd_status.change(
+        fn=update_download_button,
+        inputs=[steamcmd_status],
+        outputs=[download_btn]
+    )
     
     download_btn.click(
         fn=download_handler,
