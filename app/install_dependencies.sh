@@ -18,22 +18,6 @@ mkdir -p "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"
 chmod 755 "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"
 echo "Created required directories with proper permissions."
 
-# Check if 7z is installed
-if command -v 7z &> /dev/null; then
-    echo "7zip is already installed at $(which 7z)."
-else
-    echo "Installing 7zip..."
-    apt-get update && apt-get install -y p7zip-full
-    
-    # Verify installation
-    if command -v 7z &> /dev/null; then
-        echo "7zip installed successfully at $(which 7z)."
-    else
-        echo "ERROR: 7zip installation failed!"
-        exit 1
-    fi
-fi
-
 # Check for steamcmd directory
 STEAMCMD_DIR="${APP_DIR}/steamcmd"
 if [ -d "$STEAMCMD_DIR" ] && [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
@@ -96,13 +80,6 @@ fi
 
 # Verify all installations and permissions as a final check
 echo "Performing final verification checks..."
-
-if ! command -v 7z &> /dev/null; then
-    echo "ERROR: 7zip installation verification failed!"
-    exit 1
-else
-    echo "7zip verified at $(which 7z)"
-fi
 
 if [ ! -x "${STEAMCMD_DIR}/steamcmd.sh" ]; then
     echo "ERROR: SteamCMD verification failed!"
