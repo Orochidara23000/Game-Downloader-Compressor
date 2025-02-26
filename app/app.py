@@ -9,6 +9,7 @@ import threading
 import shutil
 import re
 import tempfile
+import glob
 
 # Configure logging
 logging.basicConfig(
@@ -393,6 +394,26 @@ def compress_game_files():
         logger.error(error_msg)
         return error_msg
 
+def get_compressed_file_list():
+    """Get a list of compressed files in the output directory"""
+    output_dir = "/app/output"
+    if not os.path.exists(output_dir):
+        return []
+    
+    files = glob.glob(os.path.join(output_dir, "*.7z"))
+    files.sort(key=os.path.getmtime, reverse=True)  # Sort by modification time, newest first
+    return [os.path.basename(f) for f in files]
+
+def get_file_for_download(filename):
+    """Return the file path for the selected file"""
+    if not filename:
+        return None
+    
+    file_path = os.path.join("/app/output", filename)
+    if os.path.exists(file_path):
+        return file_path
+    return None
+
 # Define list of free games that work with anonymous login
 FREE_GAMES = [
     {"name": "Team Fortress 2", "app_id": "440", "platform": "windows/linux"},
@@ -533,6 +554,45 @@ try:
                     compressed_files_output = gr.Textbox(label="Compressed Files", lines=20)
                     list_compressed_btn = gr.Button("📂 List Compressed Files")
                     list_compressed_btn.click(fn=list_compressed_files, inputs=None, outputs=compressed_files_output)
+        
+        # Add the new download tab
+        with gr.Tab("Download Files"):
+            gr.Markdown("""
+            ## 💾 Download Compressed Files
+            
+            Select and download the compressed game files you've created.
+            Files are listed in order of creation with the newest first.
+            """)
+            
+            file_list = get_compressed_file_list()
+            
+            if file_list:
+                file_dropdown = gr.Dropdown(
+                    label="Select File to Download",
+                    choices=file_list,
+                    value=file_list[0] if file_list else None
+                )
+                
+                refresh_files_btn = gr.Button("🔄 Refresh File List")
+                download_file_btn = gr.Button("💾 Download Selected File")
+                
+                file_output = gr.File(label="Download File")
+                
+                # Functions for the download tab
+                refresh_files_btn.click(
+                    fn=lambda: gr.update(choices=get_compressed_file_list()),
+                    inputs=None,
+                    outputs=file_dropdown
+                )
+                
+                download_file_btn.click(
+                    fn=get_file_for_download,
+                    inputs=file_dropdown,
+                    outputs=file_output
+                )
+            else:
+                gr.Markdown("### No compressed files available yet")
+                gr.Markdown("Use the Download Game tab to download a game, then compress it in the Compress Files tab.")
     
     # Launch the demo
     logger.info("Launching Gradio app...")
