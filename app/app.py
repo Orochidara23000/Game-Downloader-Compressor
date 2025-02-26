@@ -22,6 +22,57 @@ try:
 except:
     logger.info("Could not determine Gradio version")
 
+def install_steamcmd():
+    """Install SteamCMD properly with all required dependencies"""
+    try:
+        logger.info("Installing SteamCMD and dependencies...")
+        
+        # Install required 32-bit libraries
+        subprocess.run(["apt-get", "update"], check=True)
+        subprocess.run([
+            "apt-get", "install", "-y",
+            "lib32gcc-s1",  # Updated package name for newer Debian/Ubuntu
+            "lib32stdc++6",
+            "libsdl2-2.0-0:i386",
+            "libtinfo5:i386"
+        ], check=True)
+        
+        # Clean and reinstall SteamCMD properly
+        if os.path.exists("/app/steamcmd"):
+            shutil.rmtree("/app/steamcmd")
+        
+        os.makedirs("/app/steamcmd", exist_ok=True)
+        os.chdir("/app/steamcmd")
+        
+        # Download SteamCMD
+        subprocess.run(["wget", "-q", "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"], check=True)
+        subprocess.run(["tar", "-xzf", "steamcmd_linux.tar.gz"], check=True)
+        subprocess.run(["rm", "steamcmd_linux.tar.gz"], check=True)
+        
+        # Set executable permissions
+        subprocess.run(["chmod", "+x", "steamcmd.sh"], check=True)
+        
+        # Run steamcmd once to update and install itself properly
+        logger.info("Running initial SteamCMD setup...")
+        process = subprocess.run(
+            ["./steamcmd.sh", "+quit"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        
+        logger.info(f"SteamCMD output: {process.stdout}")
+        
+        if process.returncode != 0:
+            return f"SteamCMD installation failed with code {process.returncode}\n{process.stdout}"
+        
+        return "SteamCMD installed successfully!"
+    
+    except Exception as e:
+        error_msg = f"Error during SteamCMD installation: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return error_msg
+
 def system_health_check():
     """Basic system health check that runs on startup"""
     try:
@@ -39,11 +90,27 @@ def system_health_check():
         steamcmd_path = "/app/steamcmd/steamcmd.sh"
         has_steamcmd = os.path.exists(steamcmd_path)
         
+        # Test steamcmd
+        steamcmd_working = False
+        if has_steamcmd:
+            try:
+                # Run a simple test command
+                test_result = subprocess.run(
+                    [steamcmd_path, "+quit"], 
+                    capture_output=True, 
+                    text=True,
+                    timeout=10
+                )
+                steamcmd_working = test_result.returncode == 0
+            except:
+                steamcmd_working = False
+        
         # Build health report
         report = [
             f"Available disk space: {free_space_gb:.2f} GB",
             f"7zip installed: {'Yes' if has_7zip else 'No'}",
-            f"SteamCMD installed: {'Yes' if has_steamcmd else 'No'}"
+            f"SteamCMD installed: {'Yes' if has_steamcmd else 'No'}",
+            f"SteamCMD working: {'Yes' if steamcmd_working else 'No'}"
         ]
         
         logger.info("Health check complete: %s", ", ".join(report))
@@ -56,6 +123,16 @@ def system_health_check():
 def run_steamcmd_command(app_id, username="anonymous"):
     """Run SteamCMD to download a game by app_id"""
     try:
+        # First make sure we have numbers only for app_id
+        # Strip any URLs or other text to get just the app ID number
+        import re
+        app_id_match = re.search(r'(\d+)', app_id)
+        if app_id_match:
+            app_id = app_id_match.group(1)
+        else:
+            yield "Invalid app ID. Please enter a numeric Steam app ID."
+            return
+            
         logger.info(f"Starting download for App ID: {app_id}")
         
         # Create command
@@ -63,6 +140,17 @@ def run_steamcmd_command(app_id, username="anonymous"):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
             
+        # Check if SteamCMD is working
+        steamcmd_path = "/app/steamcmd/steamcmd.sh"
+        if not os.path.exists(steamcmd_path):
+            yield "SteamCMD not installed. Installing now..."
+            result = install_steamcmd()
+            yield result
+            
+            if "failed" in result.lower():
+                yield "Cannot proceed with download as SteamCMD installation failed."
+                return
+        
         # Build SteamCMD command
         cmd = [
             "/app/steamcmd/steamcmd.sh",
@@ -157,11 +245,27 @@ try:
             )
             refresh_btn = gr.Button("Refresh Status")
             refresh_btn.click(fn=system_health_check, inputs=None, outputs=status_output)
+            
+            install_btn = gr.Button("Install/Repair SteamCMD")
+            install_output = gr.Textbox(label="Installation Output", lines=10)
+            install_btn.click(fn=install_steamcmd, inputs=None, outputs=install_output)
         
         with gr.Tab("Download Game"):
             with gr.Row():
-                app_id = gr.Textbox(label="Steam App ID", value="")
+                app_id = gr.Textbox(
+                    label="Steam App ID (e.g. 230410 for Warframe)", 
+                    value="",
+                    placeholder="Enter numeric App ID or paste Steam store URL"
+                )
                 username = gr.Textbox(label="Steam Username (or anonymous)", value="anonymous")
+            
+            gr.Markdown("""
+            ## How to find the App ID
+            1. Go to the Steam store page for the game
+            2. The App ID is the number in the URL: https://store.steampowered.com/app/XXXXXX/
+            3. Free games can be downloaded with the anonymous account
+            4. Paid games require a valid Steam login
+            """)
             
             download_btn = gr.Button("Download Game")
             download_output = gr.Textbox(label="Download Progress", lines=15)
