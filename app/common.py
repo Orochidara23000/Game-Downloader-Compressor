@@ -287,6 +287,18 @@ def system_check():
                     messages.append(f"Failed to create symlink: {str(e)}")
         except Exception as e:
             messages.append(f"Failed to search for steamcmd: {str(e)}")
+        
+        # If not found, install it
+        try:
+            messages.append("Attempting to install SteamCMD...")
+            install_cmd = ["bash", "./install_dependencies.sh"]
+            result = subprocess.run(install_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                messages.append("SteamCMD installation may have been successful. Please restart the application.")
+            else:
+                messages.append(f"SteamCMD installation failed: {result.stderr}")
+        except Exception as e:
+            messages.append(f"Failed to install SteamCMD: {str(e)}")
     
     # Check for 7z in multiple locations
     sevenzip_paths = ['/usr/bin/7z', '/bin/7z', '/usr/local/bin/7z', shutil.which("7z")]
