@@ -5,6 +5,7 @@ import time
 import logging
 import subprocess
 import traceback
+from common import verify_steam_login, download_game, logger
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +45,83 @@ def system_health_check():
         error_msg = f"Error during health check: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
         return error_msg
+
+def extract_app_id(steam_url):
+    """Extract app ID from Steam URL."""
+    try:
+        # Handle URLs like https://store.steampowered.com/app/440/Team_Fortress_2/
+        if '/app/' in steam_url:
+            return steam_url.split('/app/')[1].split('/')[0]
+        return None
+    except:
+        return None
+
+def download_handler(steam_url, username, password, steam_guard_code, use_anonymous):
+    """Handle the game download process."""
+    app_id = extract_app_id(steam_url)
+    if not app_id:
+        return "Error: Invalid Steam URL. Please provide a valid Steam store URL."
+    
+    # Verify login first
+    login_result = verify_steam_login(username, password, steam_guard_code, use_anonymous)
+    if "successfully" not in login_result:
+        return f"Login failed: {login_result}"
+    
+    # Start download
+    success, message, download_path = download_game(
+        app_id, username, password, steam_guard_code, use_anonymous
+    )
+    
+    if success:
+        return f"Success! Files downloaded to: {download_path}"
+    else:
+        return f"Download failed: {message}"
+
+# Create Gradio interface
+with gr.Blocks(title="Steam Game Downloader") as demo:
+    gr.Markdown("# Steam Game Downloader")
+    gr.Markdown("Download Steam game files for later compression in Google Colab")
+    
+    with gr.Row():
+        steam_url = gr.Textbox(
+            label="Steam Store URL",
+            placeholder="https://store.steampowered.com/app/440/Team_Fortress_2/"
+        )
+    
+    with gr.Row():
+        use_anonymous = gr.Checkbox(label="Use Anonymous Login (for free games)", value=True)
+    
+    with gr.Group() as login_group:
+        username = gr.Textbox(label="Steam Username", visible=False)
+        password = gr.Textbox(label="Steam Password", type="password", visible=False)
+        steam_guard = gr.Textbox(label="Steam Guard Code (if required)", visible=False)
+    
+    def toggle_login_fields(anonymous):
+        return {
+            username: gr.update(visible=not anonymous),
+            password: gr.update(visible=not anonymous),
+            steam_guard: gr.update(visible=not anonymous)
+        }
+    
+    use_anonymous.change(toggle_login_fields, use_anonymous, [username, password, steam_guard])
+    
+    download_btn = gr.Button("Start Download")
+    status_output = gr.Textbox(label="Status", lines=5)
+    
+    download_btn.click(
+        fn=download_handler,
+        inputs=[steam_url, username, password, steam_guard, use_anonymous],
+        outputs=status_output
+    )
+
+# Launch the app
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 7860))
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=port,
+        share=True
+    )
 
 # Create a very simple Gradio app
 logger.info("Initializing Gradio app")
