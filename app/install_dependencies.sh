@@ -18,55 +18,42 @@ mkdir -p "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"
 chmod 755 "${APP_DIR}/logs" "${APP_DIR}/output" "${APP_DIR}/game"
 echo "Created required directories with proper permissions."
 
-# Check for steamcmd directory
-STEAMCMD_DIR="${APP_DIR}/steamcmd"
-if [ -d "$STEAMCMD_DIR" ] && [ -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
-    echo "SteamCMD is already installed at ${STEAMCMD_DIR}/steamcmd.sh."
-    
-    # Verify executable permissions
-    if [ -x "${STEAMCMD_DIR}/steamcmd.sh" ]; then
-        echo "SteamCMD has correct permissions."
-    else
-        echo "Setting executable permissions for SteamCMD..."
-        chmod +x "${STEAMCMD_DIR}/steamcmd.sh"
-    fi
+# Create steamcmd directory
+STEAMCMD_DIR="/app/steamcmd"
+echo "Installing SteamCMD to ${STEAMCMD_DIR}..."
+mkdir -p "$STEAMCMD_DIR"
+cd "$STEAMCMD_DIR"
+
+# Download and extract SteamCMD
+echo "Downloading SteamCMD..."
+if wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz; then
+    echo "SteamCMD download successful."
 else
-    echo "Installing SteamCMD to ${STEAMCMD_DIR}..."
-    mkdir -p "$STEAMCMD_DIR"
-    cd "$STEAMCMD_DIR"
-    
-    # Download and extract SteamCMD
-    echo "Downloading SteamCMD..."
-    if wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz; then
-        echo "SteamCMD download successful."
-    else
-        echo "ERROR: Failed to download SteamCMD!"
-        exit 1
-    fi
-    
-    echo "Extracting SteamCMD..."
-    if tar -xzf steamcmd_linux.tar.gz; then
-        echo "SteamCMD extraction successful."
-    else
-        echo "ERROR: Failed to extract SteamCMD!"
-        exit 1
-    fi
-    
-    rm steamcmd_linux.tar.gz
-    
-    # Make executable
-    echo "Setting permissions..."
-    chmod +x steamcmd.sh
-    
-    # Run SteamCMD to update itself
-    echo "Running SteamCMD initial update..."
-    ./steamcmd.sh +quit || {
-        echo "WARNING: SteamCMD initial update failed, but continuing anyway."
-    }
-    
-    echo "SteamCMD installed successfully."
-    cd "$APP_DIR"
+    echo "ERROR: Failed to download SteamCMD!"
+    exit 1
 fi
+
+echo "Extracting SteamCMD..."
+if tar -xzf steamcmd_linux.tar.gz; then
+    echo "SteamCMD extraction successful."
+else
+    echo "ERROR: Failed to extract SteamCMD!"
+    exit 1
+fi
+
+rm steamcmd_linux.tar.gz
+
+# Make executable
+echo "Setting permissions..."
+chmod +x steamcmd.sh
+
+# Run SteamCMD to update itself
+echo "Running SteamCMD initial update..."
+./steamcmd.sh +quit || {
+    echo "WARNING: SteamCMD initial update failed, but continuing anyway."
+}
+
+echo "SteamCMD installed successfully."
 
 # Create symlinks in standard paths
 echo "Creating symlinks..."
