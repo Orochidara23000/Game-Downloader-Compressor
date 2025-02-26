@@ -124,14 +124,14 @@ def system_health_check():
 
 # List of free games that work with anonymous login
 FREE_GAMES = [
-    {"name": "Team Fortress 2", "app_id": "440"},
-    {"name": "Dota 2", "app_id": "570"},
-    {"name": "Counter-Strike 2", "app_id": "730"},
-    {"name": "Unturned", "app_id": "304930"},
-    {"name": "War Thunder", "app_id": "236390"},
-    {"name": "Path of Exile", "app_id": "238960"},
-    {"name": "Destiny 2", "app_id": "1085660"},
-    {"name": "PUBG: BATTLEGROUNDS", "app_id": "578080"}
+    {"name": "Team Fortress 2", "app_id": "440", "platform": "windows,linux,macos"},
+    {"name": "Dota 2", "app_id": "570", "platform": "windows,linux,macos"},
+    {"name": "Counter-Strike 2", "app_id": "730", "platform": "windows,linux,macos"},
+    {"name": "Unturned", "app_id": "304930", "platform": "windows,linux,macos"}, 
+    {"name": "War Thunder", "app_id": "236390", "platform": "windows,linux,macos"},
+    {"name": "Path of Exile", "app_id": "238960", "platform": "windows"},
+    {"name": "Destiny 2", "app_id": "1085660", "platform": "windows"},
+    {"name": "PUBG: BATTLEGROUNDS", "app_id": "578080", "platform": "windows"}
 ]
 
 def extract_app_id(input_text):
@@ -149,7 +149,7 @@ def extract_app_id(input_text):
     # Return None if no app ID found
     return None
 
-def create_steam_script(username, password, app_id, output_dir):
+def create_steam_script(username, password, app_id, output_dir, platform="windows"):
     """Create a SteamCMD script file to handle login and download"""
     script_content = f"""@ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
@@ -162,8 +162,12 @@ force_install_dir {output_dir}
     else:
         script_content += f"login {username} {password}\n"
     
+    # Set platform override if needed
+    if platform.lower() != "linux":
+        script_content += f"@sSteamCmdForcePlatformType {platform}\n"
+    
     # Add the app update command
-    script_content += f"app_update {app_id}\n"
+    script_content += f"app_update {app_id} validate\n"
     script_content += "quit\n"
     
     # Create a temporary file
@@ -171,7 +175,7 @@ force_install_dir {output_dir}
         f.write(script_content)
         return f.name
 
-def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guard=""):
+def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guard="", platform="windows"):
     """Run SteamCMD with authentication to download a game"""
     try:
         # Extract app ID if needed
@@ -181,7 +185,7 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
             return
             
         app_id = clean_app_id
-        logger.info(f"Starting download for App ID: {app_id}")
+        logger.info(f"Starting download for App ID: {app_id} on platform: {platform}")
         
         # Check if anonymous login is being used
         is_anonymous = username.lower() == "anonymous"
@@ -194,99 +198,76 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
             if password:
                 logger.info(f"Using password (redacted) for user {username}")
             else:
-                logger.info(f"No password provided for user {username}")
-                
-            if steam_guard:
-                logger.info("Steam Guard code provided (redacted)")
-            
-        # Create command
+                yield f"⚠️ No password provided for user {username}. Authentication may fail.\n"
+        
+        # Create output directory
         output_dir = "/app/game"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
             
-        # Check if SteamCMD is working
-        steamcmd_path = "/app/steamcmd/steamcmd.sh"
-        if not os.path.exists(steamcmd_path):
-            yield "🔄 SteamCMD not installed. Installing now..."
-            result = install_steamcmd()
-            yield result
-            
-            if "failed" in result.lower():
-                yield "❌ Cannot proceed with download as SteamCMD installation failed."
-                return
+        # Create the script file
+        script_file = create_steam_script(username, password, app_id, output_dir, platform)
+        yield f"ℹ️ Created SteamCMD script with platform set to {platform}.\n"
         
-        # Create a script file for SteamCMD (safer handling of credentials)
-        script_file = create_steam_script(username, password, app_id, output_dir)
-        
-        # Execute command with real-time output capture
-        cmd = [steamcmd_path]
-        
-        # Add Steam Guard code as an environment variable if provided
-        env = os.environ.copy()
-        if steam_guard and not is_anonymous:
-            cmd.extend(["+set_steam_guard_code", steam_guard])
-            
-        # Add script file
-        cmd.extend(["+runscript", script_file])
-        
-        yield f"🚀 Starting download of App ID: {app_id}\n"
-        
-        # Start the process
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env
-        )
-        
-        # Collect output
-        output_lines = []
-        steam_guard_requested = False
-        
-        for line in iter(process.stdout.readline, ''):
-            clean_line = line.strip()
-            output_lines.append(clean_line)
-            
-            # Keep a reasonable buffer size
-            if len(output_lines) > 100:
-                output_lines.pop(0)
-                
-            logger.info(f"STEAMCMD: {clean_line}")
-            
-            # Check if Steam Guard code is requested
-            if "Steam Guard code:" in clean_line and not steam_guard:
-                steam_guard_requested = True
-                output_lines.append("⚠️ STEAM GUARD REQUIRED: Please enter your Steam Guard code in the interface and try again")
-            
-            # Look for error messages
-            if "No subscription" in clean_line:
-                output_lines.append("\n⚠️ ERROR: You don't own this game or it's not available with anonymous login")
-            
-            # Show live progress
-            yield "\n".join(output_lines)
-        
-        # Clean up the script file
         try:
-            os.unlink(script_file)
-        except:
-            pass
-        
-        # Get final exit code
-        process.stdout.close()
-        return_code = process.wait()
-        
-        # Check result
-        if return_code != 0:
-            yield f"\n\n❌ Download failed with exit code {return_code}"
-        else:
-            yield "\n\n✅ Download completed successfully!"
+            # Execute SteamCMD with the script
+            cmd = ["/app/steamcmd/steamcmd.sh", "+runscript", script_file]
             
-        # If Steam Guard was requested but not provided, add instructions
-        if steam_guard_requested:
-            yield "\n\n🔐 Please enter your Steam Guard code and try again."
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
             
+            # Variables to track Steam Guard request
+            needs_steam_guard = False
+            
+            # Collect output
+            output_lines = []
+            for line in iter(process.stdout.readline, ''):
+                output_lines.append(line.strip())
+                if len(output_lines) > 100:  # Keep only last 100 lines
+                    output_lines.pop(0)
+                logger.info(f"STEAMCMD: {line.strip()}")
+                
+                # Check for Steam Guard request
+                if "Steam Guard code:" in line or "Two-factor code:" in line:
+                    needs_steam_guard = True
+                    if steam_guard:
+                        # Send the provided Steam Guard code
+                        process.stdin.write(f"{steam_guard}\n")
+                        process.stdin.flush()
+                        output_lines.append(f"Submitted Steam Guard code: {steam_guard}")
+                    else:
+                        output_lines.append("⚠️ Steam Guard code required but not provided!")
+                
+                # Check for platform error and provide helpful message
+                if "Invalid platform" in line:
+                    output_lines.append("⚠️ This game doesn't support the selected platform.")
+                    output_lines.append("Try changing the platform to 'windows' in the advanced settings.")
+                
+                yield "\n".join(output_lines)
+            
+            # Get final exit code
+            process.stdout.close()
+            return_code = process.wait()
+            
+            # Check result
+            if return_code != 0:
+                if "Invalid platform" in "\n".join(output_lines):
+                    yield "\n\n⚠️ Download failed: Game not available for the selected platform."
+                    yield "Please try again with platform set to 'windows'."
+                else:
+                    yield f"\n\n⚠️ Download failed with exit code {return_code}"
+            else:
+                yield "\n\n✅ Download completed successfully!"
+                
+        finally:
+            # Clean up the temporary script file
+            if os.path.exists(script_file):
+                os.unlink(script_file)
+                
     except Exception as e:
         error_msg = f"Error during download: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
@@ -295,70 +276,82 @@ def run_steamcmd_with_auth(app_id, username="anonymous", password="", steam_guar
 def compress_game_files():
     """Compress downloaded game files using 7zip"""
     try:
-        game_dir = "/app/game"
-        output_dir = "/app/output"
+        yield "Starting compression of game files..."
         
-        # Ensure directories exist
+        # Check if game directory exists and has files
+        game_dir = "/app/game"
+        if not os.path.exists(game_dir):
+            yield "Error: Game directory doesn't exist. Download a game first."
+            return
+            
+        # Check if there are files to compress
+        file_count = sum(len(files) for _, _, files in os.walk(game_dir))
+        if file_count == 0:
+            yield "No files found to compress. Download a game first."
+            return
+            
+        # Create output directory
+        output_dir = "/app/output"
         os.makedirs(output_dir, exist_ok=True)
         
-        # Check if there are files to compress
-        if not os.path.exists(game_dir) or not os.listdir(game_dir):
-            yield "No game files found to compress. Please download a game first."
-            return
+        # Get app ID or name from directory if possible
+        app_id = "game"
+        steamapps_path = os.path.join(game_dir, "steamapps", "appmanifest_*.acf")
+        import glob
+        manifest_files = glob.glob(steamapps_path)
+        if manifest_files:
+            # Extract app ID from manifest filename
+            manifest_file = os.path.basename(manifest_files[0])
+            app_id_match = re.search(r'appmanifest_(\d+).acf', manifest_file)
+            if app_id_match:
+                app_id = app_id_match.group(1)
         
-        # Create output filename with timestamp
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        output_file = f"{output_dir}/game_{timestamp}.7z"
+        # Create timestamp
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        output_file = os.path.join(output_dir, f"steam_game_{app_id}_{timestamp}.7z")
         
-        # Build 7zip command
+        yield f"Compressing game files from {game_dir}\nOutput file: {output_file}\nThis may take some time..."
+        
+        # Run 7zip to compress the files
         cmd = [
-            "7z", "a",
-            "-t7z",     # Type: 7z
-            "-m0=lzma2",  # Method: LZMA2
-            "-mx=9",    # Level: Ultra
-            "-aoa",     # Overwrite all existing files
-            output_file,
-            f"{game_dir}/*"
+            "7z", "a",          # Add to archive
+            "-t7z",             # 7z format
+            "-m0=lzma2",        # LZMA2 method
+            "-mx=9",            # Ultra compression
+            "-aoa",             # Overwrite all existing files
+            output_file,        # Output file
+            f"{game_dir}/*"     # Input files
         ]
         
-        yield f"Starting compression of game files to {output_file}...\n"
-        
-        # Execute command with real-time output capture
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
-            shell=True  # Use shell for wildcard expansion
+            bufsize=1
         )
         
-        # Collect output
-        output_lines = []
+        # Show progress
+        progress_output = []
         for line in iter(process.stdout.readline, ''):
-            clean_line = line.strip()
-            output_lines.append(clean_line)
-            
-            # Keep a reasonable buffer size
-            if len(output_lines) > 100:
-                output_lines.pop(0)
-                
-            logger.info(f"7ZIP: {clean_line}")
-            yield "\n".join(output_lines)
+            progress_output.append(line.strip())
+            if len(progress_output) > 20:  # Keep only last 20 lines
+                progress_output.pop(0)
+            yield "\n".join(progress_output)
         
-        # Get final exit code
+        # Get result
         process.stdout.close()
         return_code = process.wait()
         
-        # Check result
         if return_code != 0:
-            yield f"Compression failed with exit code {return_code}"
-        else:
-            # Get file size
-            size_bytes = os.path.getsize(output_file)
-            size_mb = size_bytes / (1024 * 1024)
+            yield f"Error: Compression failed with code {return_code}"
+            return
             
-            yield f"Compression completed successfully!\nOutput file: {output_file}\nSize: {size_mb:.2f} MB"
+        # Report success
+        size_bytes = os.path.getsize(output_file)
+        size_mb = size_bytes / (1024 * 1024)
+            
+        yield f"Compression completed successfully!\nOutput file: {output_file}\nSize: {size_mb:.2f} MB"
     
     except Exception as e:
         error_msg = f"Error during compression: {str(e)}\n{traceback.format_exc()}"
@@ -458,13 +451,16 @@ try:
             
             > ⚠️ **Security Notice**: Your credentials are only used for this download session and are not stored. 
             > For maximum security, consider using this tool only for free games with anonymous login.
+            
+            > ℹ️ **Platform Note**: Many games are Windows-only. If you get "Invalid platform" errors, make sure 
+            > the platform is set to "windows" in the advanced settings below.
             """)
             
             # Create a markdown table of free games
             free_games_md = "### Free Games That Work With Anonymous Login:\n\n"
-            free_games_md += "| Game | App ID |\n|------|--------|\n"
+            free_games_md += "| Game | App ID | Platforms |\n|------|--------|----------|\n"
             for game in FREE_GAMES:
-                free_games_md += f"| {game['name']} | {game['app_id']} |\n"
+                free_games_md += f"| {game['name']} | {game['app_id']} | {game['platform']} |\n"
             
             gr.Markdown(free_games_md)
             
@@ -494,13 +490,21 @@ try:
                         value="",
                         placeholder="If 2FA is enabled"
                     )
+                
+                with gr.Accordion("Advanced Settings", open=False):
+                    platform = gr.Dropdown(
+                        label="Platform",
+                        choices=["windows", "linux", "macos"],
+                        value="windows",
+                        info="Most games require Windows platform"
+                    )
             
             download_btn = gr.Button("Download Game")
             download_output = gr.Textbox(label="Download Progress", lines=15)
             
             download_btn.click(
                 fn=run_steamcmd_with_auth,
-                inputs=[app_id, username, password, steam_guard],
+                inputs=[app_id, username, password, steam_guard, platform],
                 outputs=download_output
             )
         
