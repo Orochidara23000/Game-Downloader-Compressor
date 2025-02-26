@@ -13,10 +13,18 @@ RUN apt-get update && apt-get install -y \
     p7zip-full \
     findutils \
     procps \
+    dos2unix \
     && apt-get clean
+
+# Convert Windows line endings to Unix for all shell scripts
+RUN find /app -type f -name "*.sh" -exec dos2unix {} \;
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Make scripts executable 
+RUN chmod +x /app/start.sh /app/install_dependencies.sh
+
 
 # Explicitly install SteamCMD and 7zip
 RUN echo "Installing 7zip..." && \
