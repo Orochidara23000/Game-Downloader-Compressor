@@ -25,9 +25,9 @@ except PermissionError:
     print(f"Warning: Cannot create log directory at {log_dir} - permission denied. Using current directory.")
     log_dir = os.getcwd()
 
-log_filename = os.path.join(log_dir, f'download_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+log_filename = os.path.join(log_dir, f'process_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
 
-logger = logging.getLogger("GameDownloader")
+logger = logging.getLogger("SteamCMDLogger")
 logger.setLevel(logging.INFO)
 if logger.hasHandlers():
     logger.handlers.clear()
@@ -160,85 +160,79 @@ def hash_credentials(username, password):
     combined = f"{username}:{password}"
     return hashlib.sha256(combined.encode()).hexdigest()[:8]
 
-def install_steamcmd():
-    """Install SteamCMD manually."""
-    logger.info("Starting manual SteamCMD installation")
-    
-    steamcmd_dir = os.path.join(os.getcwd(), "steamcmd")
-    os.makedirs(steamcmd_dir, exist_ok=True)
-    
-    try:
-        # Download SteamCMD
-        download_url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
-        tar_path = os.path.join(steamcmd_dir, "steamcmd_linux.tar.gz")
-        
-        # Try wget first
-        try:
-            subprocess.run(["wget", "-O", tar_path, download_url], check=True)
-        except (subprocess.SubprocessError, FileNotFoundError):
-            # If wget fails, try curl
-            try:
-                subprocess.run(["curl", "-o", tar_path, download_url], check=True)
-            except (subprocess.SubprocessError, FileNotFoundError):
-                return "Error: Failed to download SteamCMD. Please install wget or curl."
-        
-        # Extract SteamCMD
-        subprocess.run(["tar", "-xzf", tar_path, "-C", steamcmd_dir], check=True)
-        os.remove(tar_path)
-        
-        # Make executable
-        steamcmd_path = os.path.join(steamcmd_dir, "steamcmd.sh")
-        os.chmod(steamcmd_path, 0o755)
-        
-        # Initial update
-        subprocess.run([steamcmd_path, "+quit"], check=True)
-        
-        return "SteamCMD installed successfully!"
-    except Exception as e:
-        logger.error(f"Failed to install SteamCMD: {str(e)}")
-        return f"Error installing SteamCMD: {str(e)}"
-
-def verify_steam_login(username, password, steam_guard_code="", anonymous=False):
+def verify_steam_login(username, password, steam_guard_code, anonymous=False):
     """Verify Steam login credentials."""
-    logger.info(f"Verifying Steam login for {'anonymous' if anonymous else 'user'}")
+    logger.info(f"Verifying Steam login for {'anonymous' if anonymous else hash_credentials(username, password)}")
     
     steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
     if not os.path.exists(steamcmd_path):
-        msg = "Error: SteamCMD not found. Please install it first."
+        msg = "Error: SteamCMD not found. Please install dependencies first."
         logger.error(msg)
+        log_flush()
         return msg
     
     if anonymous:
         cmd_login = [steamcmd_path, '+login', 'anonymous', '+quit']
+        logger.info("Using anonymous login.")
     else:
         cmd_login = [steamcmd_path]
         if steam_guard_code:
             cmd_login += ['+set_steam_guard_code', steam_guard_code]
         cmd_login += ['+login', username, password, '+quit']
     
-    try:
-        process = subprocess.run(cmd_login, capture_output=True, text=True, timeout=60)
-        if "Waiting for user info...OK" in process.stdout:
-            msg = "Steam login verified successfully."
-            logger.info(msg)
-            return msg
-        else:
-            if "Steam Guard" in process.stdout:
-                msg = "Error: Steam Guard code required or invalid."
-            elif "Invalid Password" in process.stdout:
-                msg = "Error: Invalid username or password."
+    retries = 3
+    for attempt in range(retries):
+        logger.info(f"Login attempt {attempt+1}")
+        try:
+            login_process = subprocess.Popen(
+                cmd_login, 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            register_process(login_process, "steam_login_verification")
+            
+            try:
+                output, error = login_process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                login_process.kill()
+                output, error = login_process.communicate()
+                logger.error("Login process timed out after 60 seconds")
+                msg = "Error: Login process timed out. Steam servers may be busy."
+                continue
+                
+            if "Waiting for user info...OK" in output:
+                time.sleep(5)
+                msg = "Steam login verified successfully."
+                logger.info(msg)
+                log_flush()
+                return msg
             else:
-                msg = "Error: Login failed."
-            logger.error(msg)
-            return msg
-    except subprocess.TimeoutExpired:
-        msg = "Error: Login process timed out. Steam servers may be busy."
-        logger.error(msg)
-        return msg
-    except Exception as e:
-        msg = f"Error: Login failed with exception: {str(e)}"
-        logger.error(msg)
-        return msg
+                if "Steam Guard" in output or "Two-factor code" in output:
+                    msg = "Error: Steam Guard code required or invalid."
+                elif "Invalid Password" in output or "Login Failure" in output:
+                    msg = "Error: Invalid username or password."
+                else:
+                    msg = f"Error: Login failed: {output.strip()}"
+                logger.error(msg)
+                if error:
+                    logger.error(f"Error output: {error}")
+                log_flush()
+                
+                if attempt < retries - 1:
+                    logger.info("Retrying login...")
+                    time.sleep(10)
+                else:
+                    return msg
+        except Exception as e:
+            logger.error(f"Exception during login attempt: {str(e)}")
+            if attempt < retries - 1:
+                logger.info("Retrying login...")
+                time.sleep(10)
+            else:
+                return f"Error: Exception during login: {str(e)}"
+    
+    return "Error: Failed to verify login after multiple attempts."
 
 def system_check():
     """Perform system checks and return status."""
@@ -413,6 +407,354 @@ def estimate_game_size(app_id, steamcmd_path):
         logger.error(msg)
         return msg, None
 
+def download_and_compress(username, password, steam_guard_code, app_id, output_path, anonymous=False, resume=False):
+    """Download and compress a game using SteamCMD."""
+    credentials_hash = "anonymous" if anonymous else hash_credentials(username, password)
+    logger.info(f"Starting download and compression process for user {credentials_hash}, App ID: {app_id}, Output: {output_path}")
+    log_flush()
+
+    # Verify output path
+    msg = verify_output_path(output_path)
+    if "Error" in msg:
+        return "", msg
+
+    # Check disk space
+    local_available = get_available_space(os.getcwd())
+    if local_available < 10*1024**3:
+        warning = "Warning: Less than 10GB available on disk. Download may fail."
+        logger.warning(warning)
+        
+    # Prepare game directory
+    if not resume:
+        if os.path.exists("./game"):
+            try:
+                shutil.rmtree("./game")
+            except Exception as e:
+                error_msg = f"Error cleaning up game directory: {str(e)}"
+                logger.error(error_msg)
+                return "", error_msg
+    
+    try:
+        if not os.path.exists("./game"):
+            os.makedirs("./game")
+    except Exception as e:
+        error_msg = f"Error creating game directory: {str(e)}"
+        logger.error(error_msg)
+        return "", error_msg
+
+    # Locate steamcmd
+    steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
+    if not os.path.exists(steamcmd_path):
+        error_msg = "Error: SteamCMD not found."
+        logger.error(error_msg)
+        return "", error_msg
+
+    # Login to Steam
+    if anonymous:
+        cmd_login = [steamcmd_path, '+login', 'anonymous', '+quit']
+        logger.info("Using anonymous login for download.")
+    else:
+        cmd_login = [steamcmd_path]
+        if steam_guard_code:
+            cmd_login += ['+set_steam_guard_code', steam_guard_code]
+        cmd_login += ['+login', username, password, '+quit']
+        
+    logger.info('Attempting to log in...')
+    log_flush()
+    
+    try:
+        login_process = subprocess.Popen(
+            cmd_login, 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        register_process(login_process, f"steam_login_{app_id}")
+        
+        try:
+            output_login, error_login = login_process.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            login_process.kill()
+            output_login, error_login = login_process.communicate()
+            error_msg = "Login process timed out. Steam servers may be busy."
+            logger.error(error_msg)
+            log_flush()
+            return "", error_msg
+            
+        logger.info(f"Login output: {output_login}")
+        if error_login:
+            logger.error(f"Login error: {error_login}")
+        log_flush()
+        
+        if "Waiting for user info...OK" not in output_login:
+            if "Steam Guard" in output_login or "Two-factor code" in output_login:
+                error_msg = "Steam Guard code required or invalid. Check your email or authenticator."
+            elif "Invalid Password" in output_login or "Login Failure" in output_login:
+                error_msg = "Invalid username or password."
+            else:
+                error_msg = f"Login failed: {output_login.strip()}"
+            logger.error(error_msg)
+            log_flush()
+            return "", error_msg
+            
+        time.sleep(5)
+        status_messages = ["Login successful."]
+        logger.info("Login successful.")
+        log_flush()
+    except Exception as e:
+        error_msg = f"Exception during login: {str(e)}"
+        logger.error(error_msg)
+        log_flush()
+        return "", error_msg
+
+    # Update app info
+    try:
+        max_attempts = 3
+        app_info_updated = False
+        
+        for attempt in range(max_attempts):
+            logger.info(f"Attempt {attempt+1} to update AppInfo...")
+            update_proc = subprocess.Popen(
+                [steamcmd_path, '+app_info_update', '1', '+quit'], 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            register_process(update_proc, f"update_app_info_{app_id}")
+            
+            try:
+                update_output, update_error = update_proc.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                update_proc.kill()
+                update_output, update_error = update_proc.communicate()
+                logger.warning("AppInfo update timed out, retrying...")
+                continue
+                
+            logger.info(f"AppInfo update output: {update_output}")
+            if update_error:
+                logger.warning(f"AppInfo update error: {update_error}")
+                
+            if "Failed to request AppInfo update" not in update_output:
+                logger.info("AppInfo update successful.")
+                app_info_updated = True
+                break
+            else:
+                logger.warning("AppInfo update failed, retrying...")
+                log_flush()
+                time.sleep(5)
+                
+        if not app_info_updated:
+            logger.warning("Could not update AppInfo after multiple attempts, proceeding anyway.")
+    except Exception as e:
+        logger.error(f"Exception during AppInfo update: {str(e)}")
+    
+    # Download game
+    cmd_download = [
+        steamcmd_path,
+        '+force_install_dir', './game',
+        '+app_update', app_id, 'validate',
+        '+quit'
+    ]
+    logger.info('Starting download...')
+    log_flush()
+    
+    try:
+        process_download = subprocess.Popen(
+            cmd_download,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        register_process(process_download, f"download_{app_id}")
+        
+        download_start_time = time.time()
+        status_messages = []
+        
+        # Process stdout
+        for line in process_download.stdout:
+            if '%' in line:
+                try:
+                    progress_match = re.search(r'(\d+)%', line)
+                    if progress_match:
+                        progress = int(progress_match.group(1))
+                        elapsed_time = time.time() - download_start_time
+                        if progress > 0:
+                            total_time_est = elapsed_time / (progress / 100)
+                            remaining_time = total_time_est - elapsed_time
+                            minutes, seconds = divmod(int(remaining_time), 60)
+                            hours, minutes = divmod(minutes, 60)
+                            
+                            time_remaining = ""
+                            if hours > 0:
+                                time_remaining = f"~{hours}h {minutes}m remaining"
+                            else:
+                                time_remaining = f"~{minutes}m {seconds}s remaining"
+                                
+                            status = f"Downloading: {progress}% complete, {time_remaining}"
+                            status_messages.append(status)
+                            logger.info(status)
+                            log_flush()
+                        else:
+                            status_messages.append(line.strip())
+                            logger.info(line.strip())
+                            log_flush()
+                except Exception as e:
+                    logger.warning(f"Failed to parse download progress: {line.strip()}, error: {str(e)}")
+                    status_messages.append(line.strip())
+                    log_flush()
+            else:
+                status_messages.append(line.strip())
+                logger.info(f"Download output: {line.strip()}")
+                log_flush()
+                
+        process_download.wait()
+        
+        if process_download.returncode != 0:
+            error_output = ""
+            for line in process_download.stderr:
+                error_output += line
+                logger.error(f"Download error: {line.strip()}")
+                
+            logger.error(f"Download failed with code {process_download.returncode}")
+            log_flush()
+            return "\n".join(status_messages), f"Download failed with code {process_download.returncode}: {error_output}"
+    except Exception as e:
+        error_msg = f"Exception during download: {str(e)}"
+        logger.error(error_msg)
+        log_flush()
+        return "\n".join(status_messages) if status_messages else "", error_msg
+
+    # Compression
+    logger.info('Starting compression...')
+    status_messages.append('Starting compression...')
+    log_flush()
+    
+    try:
+        cmd_compress = ['7z', 'a', '-t7z', '-v4g', output_path, './game']
+        process_compress = subprocess.Popen(
+            cmd_compress,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        register_process(process_compress, f"compress_{app_id}")
+        
+        compress_start_time = time.time()
+        
+        # Process stdout
+        for line in process_compress.stdout:
+            if '%' in line:
+                try:
+                    progress_match = re.search(r'(\d+)%', line)
+                    if progress_match:
+                        progress = int(progress_match.group(1))
+                        elapsed_time = time.time() - compress_start_time
+                        if progress > 0:
+                            total_time_est = elapsed_time / (progress / 100)
+                            remaining_time = total_time_est - elapsed_time
+                            minutes, seconds = divmod(int(remaining_time), 60)
+                            hours, minutes = divmod(minutes, 60)
+                            
+                            time_remaining = ""
+                            if hours > 0:
+                                time_remaining = f"~{hours}h {minutes}m remaining"
+                            else:
+                                time_remaining = f"~{minutes}m {seconds}s remaining"
+                                
+                            status = f"Compressing: {progress}% complete, {time_remaining}"
+                            status_messages.append(status)
+                            logger.info(status)
+                            log_flush()
+                        else:
+                            status_messages.append(line.strip())
+                            logger.info(line.strip())
+                            log_flush()
+                except Exception as e:
+                    logger.warning(f"Failed to parse compression progress: {line.strip()}, error: {str(e)}")
+                    status_messages.append(line.strip())
+                    log_flush()
+            else:
+                status_messages.append(line.strip())
+                logger.info(f"Compression output: {line.strip()}")
+                log_flush()
+                
+        process_compress.wait()
+        
+        if process_compress.returncode != 0:
+            error_output = ""
+            for line in process_compress.stderr:
+                error_output += line
+                logger.error(f"Compression error: {line.strip()}")
+                
+            logger.error(f"Compression failed with code {process_compress.returncode}")
+            log_flush()
+            return "\n".join(status_messages), f"Compression failed with code {process_compress.returncode}: {error_output}"
+    except Exception as e:
+        error_msg = f"Exception during compression: {str(e)}"
+        logger.error(error_msg)
+        log_flush()
+        return "\n".join(status_messages), error_msg
+
+    # Cleanup
+    try:
+        shutil.rmtree("./game", ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Failed to clean up game directory: {str(e)}")
+        
+    completion_msg = f"Completed! Files saved as {output_path}.001, {output_path}.002, etc."
+    logger.info(completion_msg)
+    log_flush()
+    return "\n".join(status_messages) + "\n" + completion_msg, ""
+
+def download_and_compress_from_url(username, password, steam_guard_code, anonymous, steam_url, output_path, resume=False):
+    """Extract app ID from URL and start download process."""
+    logger.info(f"Extracting app ID from URL: {steam_url}")
+    match = re.search(r"/app/(\d+)", steam_url)
+    if not match:
+        error_msg = "Error: Could not extract App ID from Steam URL."
+        logger.error(error_msg)
+        log_flush()
+        return "", error_msg
+        
+    app_id = match.group(1)
+    logger.info(f"Extracted App ID: {app_id}")
+    log_flush()
+    
+    # Save metadata about this download
+    try:
+        metadata = {
+            "app_id": app_id,
+            "steam_url": steam_url,
+            "timestamp": datetime.now().isoformat(),
+            "output_path": output_path,
+            "user": "anonymous" if anonymous else hash_credentials(username, password)
+        }
+        metadata_dir = os.path.join(os.path.dirname(output_path), ".metadata")
+        os.makedirs(metadata_dir, exist_ok=True)
+        with open(os.path.join(metadata_dir, f"{app_id}.json"), 'w') as f:
+            json.dump(metadata, f)
+    except Exception as e:
+        logger.warning(f"Failed to save metadata: {str(e)}")
+    
+    # Check game size
+    size_msg, size_bytes = estimate_game_size(app_id, os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh"))
+    status_messages = [size_msg]
+    
+    # If we have size estimate, verify disk space
+    if size_bytes:
+        available_space = get_available_space(os.getcwd())
+        required_space = size_bytes * 1.5  # 50% buffer for installation and compression
+        if available_space < required_space:
+            warning = f"WARNING: Available space ({available_space/1024**3:.2f} GB) may not be sufficient for this game ({size_bytes/1024**3:.2f} GB) plus overhead."
+            logger.warning(warning)
+            status_messages.append(warning)
+    
+    # Start download process
+    status, error = download_and_compress(username, password, steam_guard_code, app_id, output_path, anonymous, resume)
+    if status:
+        status_messages.append(status)
+    return "\n".join(status_messages), error
+
 # === Queue Management ===
 
 download_queue = Queue()
@@ -559,57 +901,3 @@ def get_downloaded_files(output_path=None):
     if not files and os.path.exists(output_path):
         files.append(output_path)
     return "\n".join(files) if files else "No downloaded files found."
-
-def download_game(app_id, username="", password="", steam_guard_code="", anonymous=True):
-    """Download game files using SteamCMD."""
-    logger.info(f"Starting download for app ID: {app_id}")
-    
-    steamcmd_path = os.path.join(os.getcwd(), "steamcmd", "steamcmd.sh")
-    download_dir = os.path.join(os.getcwd(), "downloads", f"app_{app_id}")
-    os.makedirs(download_dir, exist_ok=True)
-    
-    cmd = [steamcmd_path]
-    if anonymous:
-        cmd += ['+login', 'anonymous']
-    else:
-        if steam_guard_code:
-            cmd += ['+set_steam_guard_code', steam_guard_code]
-        cmd += ['+login', username, password]
-    
-    cmd += [
-        '+force_install_dir', download_dir,
-        '+app_update', str(app_id),
-        '+validate',
-        '+quit'
-    ]
-    
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                logger.info(output.strip())
-        
-        if process.returncode == 0:
-            msg = f"Game files downloaded successfully to {download_dir}"
-            logger.info(msg)
-            return True, msg, download_dir
-        else:
-            msg = "Download failed. Check logs for details."
-            logger.error(msg)
-            return False, msg, None
-            
-    except Exception as e:
-        msg = f"Download failed with exception: {str(e)}"
-        logger.error(msg)
-        return False, msg, None

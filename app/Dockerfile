@@ -1,31 +1,31 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (removed 7zip and other compression tools)
+# Install essential dependencies
 RUN apt-get update && apt-get install -y \
-    lib32gcc-s1 \
+    p7zip-full \
     wget \
     curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
-# Copy application files
-COPY . .
+# Install only the required Python packages
+RUN pip install --no-cache-dir gradio
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Create required directories and setup steamcmd
+RUN mkdir -p /app/steamcmd && \
+    mkdir -p /app/logs /app/output /app/game && \
+    cd /app/steamcmd && \
+    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && \
+    tar -xzf steamcmd_linux.tar.gz && \
+    rm steamcmd_linux.tar.gz && \
+    chmod +x steamcmd.sh
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/downloads /app/steamcmd && \
-    chmod -R 755 /app/logs /app/downloads /app/steamcmd
+# Copy only the essential app file
+COPY app.py /app/
 
-# Expose the application port
-EXPOSE 8080
+# Expose the Gradio port
+EXPOSE 7860
 
-# Set a healthcheck
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/ || exit 1
-
-# Start the application
+# Use a simple, direct command to run the app
 CMD ["python", "app.py"]
